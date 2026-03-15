@@ -1,0 +1,26 @@
+{
+  "name": "nothing-browser",
+  "version": "0.1.0",
+  "description": "Does nothing... except everything that matters. A scrapper-first browser.",
+  "author": "BunElysiaReact",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BunElysiaReact/nothing-browser.git"
+  },
+  "scripts": {
+    "build": "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)",
+    "build:debug": "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j$(nproc)",
+    "build:windows": "scripts/build-windows.bat",
+    "build:deb": "bash scripts/build-deb.sh",
+    "clean": "rm -rf build dist",
+    "run": "cd build && ./nothing-browser",
+    "dev": "mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j$(nproc) && ./nothing-browser",
+    "release": "bash scripts/release.sh",
+    "release:bump": "node scripts/bump-version.js",
+    "install:linux": "curl -fsSL https://raw.githubusercontent.com/BunElysiaReact/nothing-browser/main/install.sh | sudo bash",
+    "cmake:configure": "mkdir -p build && cd build && cmake ..",
+    "cmake:clean": "rm -rf build/CMakeCache.txt build/CMakeFiles",
+    "cmake:reconfigure": "npm run cmake:clean && npm run cmake:configure"
+  }
+}

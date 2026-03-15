@@ -1,0 +1,83 @@
+# ── Build output ──────────────────────────────────────────────────────────────
+build/
+dist/
+out/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.app
+nothing-browser
+
+# ── CMake ─────────────────────────────────────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+
+# ── Qt / MOC autogen ──────────────────────────────────────────────────────────
+*_autogen/
+moc_*.cpp
+moc_*.cpp.d
+qrc_*.cpp
+*.moc
+ui_*.h
+
+# ── Qt Creator ────────────────────────────────────────────────────────────────
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+*.creator
+*.creator.user
+*.config
+CMakeLists.txt.user
+
+# ── CLion / JetBrains ─────────────────────────────────────────────────────────
+.idea/
+cmake-build-*/
+*.iml
+
+# ── VSCode ────────────────────────────────────────────────────────────────────
+.vscode/
+*.code-workspace
+
+# ── OS junk ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
+*.swo
+
+# ── Scrapper / session data ───────────────────────────────────────────────────
+scrapper/data/
+scrapper/sessions/
+*.session
+*.har
+
+# ── Scripts / dist packages ───────────────────────────────────────────────────
+scripts/dist/
+*.deb
+*.rpm
+*.dmg
+*.pkg
+*.msi
+*.zip
+*.tar.gz
+*.tar.bz2
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Secrets (never commit these) ──────────────────────────────────────────────
+.env
+.env.*
+secrets/
+*.key
+*.pem

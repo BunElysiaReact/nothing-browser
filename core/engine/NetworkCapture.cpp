@@ -1,0 +1,237 @@
+#include "NetworkCapture.h"
+#include <QWebEngineProfile>
+#include <QWebEngineCookieStore>
+#include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QTimer>
+
+NetworkCapture::NetworkCapture(QObject *parent) : QObject(parent) {}
+
+void NetworkCapture::attachToPage(QWebEnginePage *page, QWebEngineProfile *profile) {
+    m_page    = page;
+    m_profile = profile;
+
+    auto *store = profile->cookieStore();
+    store->loadAllCookies();
+    connect(store, &QWebEngineCookieStore::cookieAdded,
+            this,  &NetworkCapture::onCookieAdded);
+    connect(store, &QWebEngineCookieStore::cookieRemoved,
+            this,  &NetworkCapture::onCookieRemoved);
+
+    QWebEngineScript s;
+    s.setName("nothing_capture");
+    s.setSourceCode(captureScript());
+    s.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    s.setWorldId(QWebEngineScript::MainWorld);
+    s.setRunsOnSubFrames(true);
+    profile->scripts()->insert(s);
+
+    auto *timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [this]() {
+        if (!m_page) return;
+        m_page->runJavaScript(
+            "(function(){"
+            "  var q = window.__NOTHING_QUEUE__;"
+            "  if(!q || q.length===0) return '[]';"
+            "  var out = JSON.stringify(q);"
+            "  window.__NOTHING_QUEUE__ = [];"
+            "  return out;"
+            "})()",
+            [this](const QVariant &result) {
+                QString json = result.toString();
+                if (json.isEmpty() || json == "[]") return;
+                onJsMessage(json);
+            }
+        );
+    });
+    timer->start(250);
+}
+
+void NetworkCapture::onJsMessage(const QString &json) {
+    QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray()) return;
+
+    for (const auto &val : doc.array()) {
+        QJsonObject obj = val.toObject();
+        QString type = obj["type"].toString();
+
+        if (type == "request" || type == "response") {
+            CapturedRequest req;
+            req.id              = obj["id"].toString();
+            req.method          = obj["method"].toString();
+            req.url             = obj["url"].toString();
+            req.type            = obj["reqType"].toString();
+            req.status          = obj["status"].toString();
+            req.mimeType        = obj["mime"].toString();
+            req.responseBody    = obj["body"].toString();
+            req.requestHeaders  = obj["reqHeaders"].toString();
+            req.responseHeaders = obj["resHeaders"].toString();
+            req.size            = obj["size"].toInt();
+            req.timestamp       = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+            emit requestCaptured(req);
+
+        } else if (type == "ws_open") {
+            WebSocketFrame f;
+            f.connectionId = obj["id"].toString();
+            f.url          = obj["url"].toString();
+            f.direction    = "OPEN";
+            f.data         = "[WebSocket opened]";
+            f.timestamp    = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+            emit wsFrameCaptured(f);
+
+        } else if (type == "ws_send" || type == "ws_recv") {
+            WebSocketFrame f;
+            f.connectionId = obj["id"].toString();
+            f.url          = obj["url"].toString();
+            f.direction    = (type == "ws_send") ? "UP SENT" : "DN RECV";
+            f.data         = obj["data"].toString();
+            f.isBinary     = obj["binary"].toBool();
+            f.timestamp    = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+            emit wsFrameCaptured(f);
+
+        } else if (type == "ws_close") {
+            WebSocketFrame f;
+            f.connectionId = obj["id"].toString();
+            f.url          = obj["url"].toString();
+            f.direction    = "CLOSED";
+            f.data         = QString("[Closed] code=%1 reason=%2")
+                               .arg(obj["code"].toInt())
+                               .arg(obj["reason"].toString());
+            f.timestamp    = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+            emit wsFrameCaptured(f);
+
+        } else if (type == "storage") {
+            emit storageCaptured(
+                obj["origin"].toString(),
+                obj["key"].toString(),
+                obj["value"].toString(),
+                obj["storageType"].toString()
+            );
+        }
+    }
+}
+
+void NetworkCapture::onCookieAdded(const QNetworkCookie &c) {
+    CapturedCookie cookie;
+    cookie.name     = QString::fromUtf8(c.name());
+    cookie.value    = QString::fromUtf8(c.value());
+    cookie.domain   = c.domain();
+    cookie.path     = c.path();
+    cookie.httpOnly = c.isHttpOnly();
+    cookie.secure   = c.isSecure();
+    if (!c.expirationDate().isNull())
+        cookie.expires = c.expirationDate().toString(Qt::ISODate);
+    emit cookieCaptured(cookie);
+}
+
+void NetworkCapture::onCookieRemoved(const QNetworkCookie &c) {
+    emit cookieRemoved(QString::fromUtf8(c.name()), c.domain());
+}
+
+QString NetworkCapture::captureScript() {
+    return R"JS(
+(function() {
+'use strict';
+if (window.__NOTHING_CAPTURE_INIT__) return;
+window.__NOTHING_CAPTURE_INIT__ = true;
+window.__NOTHING_QUEUE__ = [];
+
+var push = function(obj) { window.__NOTHING_QUEUE__.push(obj); };
+var uid  = function() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); };
+
+var _fetch = window.fetch;
+window.fetch = function(input, init) {
+    var id     = uid();
+    var url    = (typeof input === 'string') ? input : (input.url || String(input));
+    var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
+    var reqHdrs = '';
+    try { reqHdrs = JSON.stringify((init && init.headers) ? init.headers : {}); } catch(e){}
+    push({ type:'request', id:id, method:method, url:url, reqType:'Fetch', reqHeaders:reqHdrs });
+    return _fetch.apply(this, arguments).then(function(resp) {
+        var status = resp.status;
+        var mime   = resp.headers.get('content-type') || '';
+        resp.clone().text().then(function(body) {
+            push({ type:'response', id:id, method:method, url:url, reqType:'Fetch',
+                   status:String(status), mime:mime, body:body.slice(0,8000),
+                   size:body.length, reqHeaders:reqHdrs, resHeaders:'' });
+        }).catch(function(){});
+        return resp;
+    });
+};
+
+var _open   = XMLHttpRequest.prototype.open;
+var _send   = XMLHttpRequest.prototype.send;
+var _setHdr = XMLHttpRequest.prototype.setRequestHeader;
+XMLHttpRequest.prototype.open = function(method, url) {
+    this.__n_id__     = uid();
+    this.__n_method__ = method.toUpperCase();
+    this.__n_url__    = url;
+    this.__n_hdrs__   = {};
+    return _open.apply(this, arguments);
+};
+XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
+    if (this.__n_hdrs__) this.__n_hdrs__[k] = v;
+    return _setHdr.apply(this, arguments);
+};
+XMLHttpRequest.prototype.send = function(body) {
+    var self = this;
+    var id = self.__n_id__, method = self.__n_method__ || 'GET', url = self.__n_url__ || '';
+    var reqHdrs = '';
+    try { reqHdrs = JSON.stringify(self.__n_hdrs__ || {}); } catch(e){}
+    push({ type:'request', id:id, method:method, url:url, reqType:'XHR', reqHeaders:reqHdrs });
+    self.addEventListener('load', function() {
+        var text = '';
+        try { text = self.responseText || ''; } catch(e){}
+        push({ type:'response', id:id, method:method, url:url, reqType:'XHR',
+               status:String(self.status), mime:self.getResponseHeader('content-type')||'',
+               body:text.slice(0,8000), size:text.length, reqHeaders:reqHdrs, resHeaders:'' });
+    });
+    return _send.apply(this, arguments);
+};
+
+var _WS = window.WebSocket;
+window.WebSocket = function(url, protocols) {
+    var id = uid();
+    var ws = protocols ? new _WS(url, protocols) : new _WS(url);
+    push({ type:'ws_open', id:id, url:url });
+    var _wsSend = ws.send.bind(ws);
+    ws.send = function(data) {
+        var isBin = (data instanceof ArrayBuffer || data instanceof Blob);
+        push({ type:'ws_send', id:id, url:url,
+               data:isBin ? '[Binary '+(data.byteLength||0)+' bytes]' : String(data).slice(0,4000),
+               binary:isBin });
+        return _wsSend(data);
+    };
+    ws.addEventListener('message', function(e) {
+        var isBin = (e.data instanceof ArrayBuffer || e.data instanceof Blob);
+        push({ type:'ws_recv', id:id, url:url,
+               data:isBin ? '[Binary]' : String(e.data).slice(0,4000), binary:isBin });
+    });
+    ws.addEventListener('close', function(e) {
+        push({ type:'ws_close', id:id, url:url, code:e.code, reason:e.reason });
+    });
+    return ws;
+};
+window.WebSocket.prototype  = _WS.prototype;
+window.WebSocket.CONNECTING = _WS.CONNECTING;
+window.WebSocket.OPEN       = _WS.OPEN;
+window.WebSocket.CLOSING    = _WS.CLOSING;
+window.WebSocket.CLOSED     = _WS.CLOSED;
+
+function wrapStorage(store, label) {
+    var _si = store.setItem.bind(store);
+    store.setItem = function(key, value) {
+        push({ type:'storage', storageType:label,
+               origin:window.location.origin, key:key, value:String(value).slice(0,2000) });
+        return _si(key, value);
+    };
+}
+try { wrapStorage(window.localStorage,   'localStorage');   } catch(e){}
+try { wrapStorage(window.sessionStorage, 'sessionStorage'); } catch(e){}
+
+})();
+)JS";
+}
