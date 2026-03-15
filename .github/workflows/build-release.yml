@@ -3,53 +3,98 @@ name: Build & Release
 on:
   push:
     tags:
-      - "v*"          # triggers on v0.1.0, v0.2.0 etc
-  workflow_dispatch:  # manual trigger from GitHub UI
+      - "v*"
+  workflow_dispatch:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
-  #  LINUX — Debian/Ubuntu .deb + tarball
+  #  LINUX
   # ═══════════════════════════════════════════════════════════════════════════
   build-linux:
-    name: Build Linux (Ubuntu)
+    name: Build Linux (Ubuntu 22.04)
     runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Qt6 + deps
+      - name: Install dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
-            qt6-base-dev \
-            qt6-webengine-dev \
-            libqt6webenginewidgets6 \
-            libqt6webenginecore6 \
+            libgl-dev \
+            libgles-dev \
+            libegl-dev \
+            libglu1-mesa-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libx11-dev \
+            libxext-dev \
+            libxi-dev \
+            libxrender-dev \
             cmake \
             build-essential \
             dpkg-dev \
-            libxkbcommon-dev
+            ninja-build
+
+      - name: Install Qt6 via aqt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: "6.7.0"
+          host: linux
+          target: desktop
+          arch: gcc_64
+          modules: "qtwebengine qtwebchannel qtpositioning"
+          cache: true
 
       - name: Configure
         run: |
           mkdir -p build
           cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -G Ninja
 
       - name: Build
         run: |
           cd build
-          make -j$(nproc)
+          ninja -j$(nproc)
 
       - name: Build .deb
-        run: bash scripts/build-deb.sh
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist/nothing-browser_${VERSION}_amd64/DEBIAN
+          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/local/bin
+          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/share/applications
+          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/share/nothing-browser
+          cp build/nothing-browser dist/nothing-browser_${VERSION}_amd64/usr/local/bin/
+          cp assets/icons/logo.svg dist/nothing-browser_${VERSION}_amd64/usr/share/nothing-browser/
+          cat > dist/nothing-browser_${VERSION}_amd64/DEBIAN/control << EOF
+          Package: nothing-browser
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
+          Depends: libqt6webenginewidgets6 | libqt6webenginecore6
+          Description: Nothing Browser - Does nothing... except everything that matters.
+          EOF
+          cat > dist/nothing-browser_${VERSION}_amd64/usr/share/applications/nothing-browser.desktop << EOF
+          [Desktop Entry]
+          Name=Nothing Browser
+          Exec=/usr/local/bin/nothing-browser
+          Icon=/usr/share/nothing-browser/logo.svg
+          Type=Application
+          Categories=Network;WebBrowser;Development;
+          EOF
+          dpkg-deb --build --root-owner-group \
+            dist/nothing-browser_${VERSION}_amd64 \
+            dist/nothing-browser_${VERSION}_amd64.deb
 
       - name: Build tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          cd build
-          tar -czf ../dist/nothing-browser-${VERSION}-linux-x86_64.tar.gz nothing-browser
+          tar -czf dist/nothing-browser-${VERSION}-linux-x86_64.tar.gz \
+            -C build nothing-browser
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -61,8 +106,7 @@ jobs:
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  WINDOWS — cross-compile via MXE or native windows runner
-  #  Using native windows-latest runner (GitHub provides it free)
+  #  WINDOWS
   # ═══════════════════════════════════════════════════════════════════════════
   build-windows:
     name: Build Windows (x64)
@@ -89,6 +133,7 @@ jobs:
           cd build-win
           cmake .. ^
             -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_PREFIX_PATH="%Qt6_DIR%" ^
             -G "Visual Studio 17 2022" ^
             -A x64
 
@@ -99,23 +144,20 @@ jobs:
           cmake --build . --config Release --parallel
 
       - name: Package with windeployqt
-        shell: cmd
-        run: |
-          mkdir dist\nothing-browser-win64
-          copy build-win\Release\nothing-browser.exe dist\nothing-browser-win64\
-          windeployqt ^
-            --release ^
-            --no-compiler-runtime ^
-            --webengine ^
-            dist\nothing-browser-win64\nothing-browser.exe
-
-      - name: Zip Windows build
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
+          New-Item -ItemType Directory -Force -Path "dist\nothing-browser-win64"
+          Copy-Item "build-win\Release\nothing-browser.exe" "dist\nothing-browser-win64\"
+          $qtBin = "$env:Qt6_DIR\bin"
+          & "$qtBin\windeployqt.exe" `
+            --release `
+            --no-compiler-runtime `
+            --webengine `
+            "dist\nothing-browser-win64\nothing-browser.exe"
           Compress-Archive `
-            -Path dist\nothing-browser-win64\* `
-            -DestinationPath dist\nothing-browser-${version}-windows-x64.zip
+            -Path "dist\nothing-browser-win64\*" `
+            -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -125,11 +167,11 @@ jobs:
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  MACOS — native build
+  #  MACOS
   # ═══════════════════════════════════════════════════════════════════════════
   build-macos:
-    name: Build macOS (arm64 + x86_64)
-    runs-on: macos-14   # arm64 runner (M1) — also builds x86_64 via universal
+    name: Build macOS
+    runs-on: macos-14
 
     steps:
       - name: Checkout
@@ -149,22 +191,69 @@ jobs:
         run: |
           mkdir -p build-mac
           cd build-mac
+          # MACOSX_BUNDLE=ON makes CMake produce a proper .app bundle
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -DMACOSX_BUNDLE=ON \
+            -DCMAKE_MACOSX_BUNDLE=ON
+
+      - name: Patch CMakeLists for bundle
+        # If main.cpp doesn't set MACOSX_BUNDLE, force it via cmake property
+        run: |
+          cd build-mac
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -DCMAKE_EXE_LINKER_FLAGS="-framework Cocoa"
+          # Patch the target to be a bundle
+          cat >> CMakeCache.txt << 'EOF'
+          nothing-browser_MACOSX_BUNDLE:BOOL=ON
+          EOF
 
       - name: Build
         run: |
           cd build-mac
           make -j$(sysctl -n hw.ncpu)
 
-      - name: Package .app
+      - name: Create .app bundle manually if needed
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cd build-mac
-          macdeployqt nothing-browser.app -dmg
-          mv nothing-browser.dmg ../dist/nothing-browser-${VERSION}-macos-universal.dmg
+
+          # Check if .app was produced, if not create it manually
+          if [ -d "build-mac/nothing-browser.app" ]; then
+            echo "Bundle exists, using it directly"
+            APP_PATH="build-mac/nothing-browser.app"
+          else
+            echo "No .app found — wrapping binary into bundle manually"
+            APP_PATH="build-mac/nothing-browser.app"
+            mkdir -p "${APP_PATH}/Contents/MacOS"
+            mkdir -p "${APP_PATH}/Contents/Resources"
+            cp build-mac/nothing-browser "${APP_PATH}/Contents/MacOS/"
+            cat > "${APP_PATH}/Contents/Info.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>  <string>nothing-browser</string>
+            <key>CFBundleIdentifier</key> <string>dev.nothingbrowser.app</string>
+            <key>CFBundleName</key>       <string>Nothing Browser</string>
+            <key>CFBundleVersion</key>    <string>${VERSION}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          fi
+
+          # Run macdeployqt to bundle Qt libs + make .dmg
+          ${Qt6_DIR}/bin/macdeployqt "${APP_PATH}" \
+            -dmg \
+            -always-overwrite
+          mv build-mac/nothing-browser.dmg \
+            dist/nothing-browser-${VERSION}-macos.dmg
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
@@ -174,7 +263,7 @@ jobs:
           retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  RELEASE — collect all artifacts and publish GitHub Release
+  #  RELEASE — publish all artifacts
   # ═══════════════════════════════════════════════════════════════════════════
   release:
     name: Publish Release
@@ -183,7 +272,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
 
     permissions:
-      contents: write   # needed to create releases
+      contents: write
 
     steps:
       - name: Checkout
@@ -200,7 +289,7 @@ jobs:
       - name: Read changelog from version.json
         id: changelog
         run: |
-          NOTES=$(python3 - << 'EOF'
+          NOTES=$(python3 - << 'PYEOF'
           import json
           with open("version.json") as f:
               data = json.load(f)
@@ -210,13 +299,13 @@ jobs:
               tag = "[+]" if t == "added" else "[F]" if t == "fix" else "[→]"
               lines.append(f"{tag} {e['text']}")
           print("\n".join(lines))
-          EOF
+          PYEOF
           )
           echo "NOTES<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "Nothing Browser ${{ github.ref_name }}"
@@ -225,24 +314,26 @@ jobs:
 
             > Does nothing... except everything that matters.
 
-            ### Changes
+            ### What changed
             ${{ steps.changelog.outputs.NOTES }}
+
+            ---
 
             ### Install
 
-            **Linux (one line):**
+            **Linux — one line:**
             ```bash
             curl -fsSL https://raw.githubusercontent.com/BunElysiaReact/nothing-browser/main/install.sh | sudo bash
             ```
 
-            **Windows:** Download the `.zip`, extract, run `nothing-browser.exe`
-
-            **macOS:** Download the `.dmg`, open, drag to Applications
-
-            **Debian/Ubuntu:**
+            **Debian/Ubuntu .deb:**
             ```bash
             sudo dpkg -i nothing-browser_*_amd64.deb
             ```
+
+            **Windows:** Download `.zip` → extract → run `nothing-browser.exe`
+
+            **macOS:** Download `.dmg` → open → drag to Applications
           files: |
             release-artifacts/linux-build/*.deb
             release-artifacts/linux-build/*.tar.gz
