@@ -1,0 +1,252 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"          # triggers on v0.1.0, v0.2.0 etc
+  workflow_dispatch:  # manual trigger from GitHub UI
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  LINUX — Debian/Ubuntu .deb + tarball
+  # ═══════════════════════════════════════════════════════════════════════════
+  build-linux:
+    name: Build Linux (Ubuntu)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt6 + deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            qt6-base-dev \
+            qt6-webengine-dev \
+            libqt6webenginewidgets6 \
+            libqt6webenginecore6 \
+            cmake \
+            build-essential \
+            dpkg-dev \
+            libxkbcommon-dev
+
+      - name: Configure
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd build
+          make -j$(nproc)
+
+      - name: Build .deb
+        run: bash scripts/build-deb.sh
+
+      - name: Build tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          cd build
+          tar -czf ../dist/nothing-browser-${VERSION}-linux-x86_64.tar.gz nothing-browser
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  WINDOWS — cross-compile via MXE or native windows runner
+  #  Using native windows-latest runner (GitHub provides it free)
+  # ═══════════════════════════════════════════════════════════════════════════
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: "6.7.0"
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          modules: "qtwebengine qtwebchannel qtpositioning"
+          cache: true
+
+      - name: Configure (MSVC)
+        shell: cmd
+        run: |
+          mkdir build-win
+          cd build-win
+          cmake .. ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -G "Visual Studio 17 2022" ^
+            -A x64
+
+      - name: Build
+        shell: cmd
+        run: |
+          cd build-win
+          cmake --build . --config Release --parallel
+
+      - name: Package with windeployqt
+        shell: cmd
+        run: |
+          mkdir dist\nothing-browser-win64
+          copy build-win\Release\nothing-browser.exe dist\nothing-browser-win64\
+          windeployqt ^
+            --release ^
+            --no-compiler-runtime ^
+            --webengine ^
+            dist\nothing-browser-win64\nothing-browser.exe
+
+      - name: Zip Windows build
+        shell: powershell
+        run: |
+          $version = "${{ github.ref_name }}" -replace "^v", ""
+          Compress-Archive `
+            -Path dist\nothing-browser-win64\* `
+            -DestinationPath dist\nothing-browser-${version}-windows-x64.zip
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: dist\*.zip
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  MACOS — native build
+  # ═══════════════════════════════════════════════════════════════════════════
+  build-macos:
+    name: Build macOS (arm64 + x86_64)
+    runs-on: macos-14   # arm64 runner (M1) — also builds x86_64 via universal
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: "6.7.0"
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: "qtwebengine qtwebchannel qtpositioning"
+          cache: true
+
+      - name: Configure
+        run: |
+          mkdir -p build-mac
+          cd build-mac
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+      - name: Build
+        run: |
+          cd build-mac
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Package .app
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          cd build-mac
+          macdeployqt nothing-browser.app -dmg
+          mv nothing-browser.dmg ../dist/nothing-browser-${VERSION}-macos-universal.dmg
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: dist/*.dmg
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  RELEASE — collect all artifacts and publish GitHub Release
+  # ═══════════════════════════════════════════════════════════════════════════
+  release:
+    name: Publish Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write   # needed to create releases
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: List artifacts
+        run: find release-artifacts -type f
+
+      - name: Read changelog from version.json
+        id: changelog
+        run: |
+          NOTES=$(python3 - << 'EOF'
+          import json
+          with open("version.json") as f:
+              data = json.load(f)
+          lines = []
+          for e in data.get("changelog", []):
+              t = e["type"]
+              tag = "[+]" if t == "added" else "[F]" if t == "fix" else "[→]"
+              lines.append(f"{tag} {e['text']}")
+          print("\n".join(lines))
+          EOF
+          )
+          echo "NOTES<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Nothing Browser ${{ github.ref_name }}"
+          body: |
+            ## Nothing Browser ${{ github.ref_name }}
+
+            > Does nothing... except everything that matters.
+
+            ### Changes
+            ${{ steps.changelog.outputs.NOTES }}
+
+            ### Install
+
+            **Linux (one line):**
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/BunElysiaReact/nothing-browser/main/install.sh | sudo bash
+            ```
+
+            **Windows:** Download the `.zip`, extract, run `nothing-browser.exe`
+
+            **macOS:** Download the `.dmg`, open, drag to Applications
+
+            **Debian/Ubuntu:**
+            ```bash
+            sudo dpkg -i nothing-browser_*_amd64.deb
+            ```
+          files: |
+            release-artifacts/linux-build/*.deb
+            release-artifacts/linux-build/*.tar.gz
+            release-artifacts/windows-build/*.zip
+            release-artifacts/macos-build/*.dmg
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
