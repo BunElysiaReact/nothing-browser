@@ -11,86 +11,62 @@ on:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
-  #  LINUX
+  #  LINUX — use apt directly, no aqt nonsense
   # ═══════════════════════════════════════════════════════════════════════════
   build-linux:
-    name: Build Linux (Ubuntu 22.04)
+    name: Build Linux
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install Qt6 + deps via apt
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \
+            qt6-base-dev \
+            qt6-webengine-dev \
+            libqt6webenginewidgets6 \
+            libqt6webenginecore6 \
             libgl-dev \
-            libgles-dev \
             libegl-dev \
             libglu1-mesa-dev \
             libxkbcommon-dev \
             libxkbcommon-x11-dev \
-            libx11-dev \
-            libxext-dev \
-            libxi-dev \
-            libxrender-dev \
             cmake \
+            ninja-build \
             build-essential \
-            dpkg-dev \
-            ninja-build
-
-      - name: Install Qt6 via aqt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.3"
-          host: linux
-          target: desktop
-          arch: linux_gcc_64
-          modules: "qtwebengine qtwebchannel qtpositioning"
-          cache: true
+            dpkg-dev
 
       - name: Configure
-        run: |
-          # jurplel/install-qt-action sets Qt6_DIR to the cmake config dir
-          # resolve actual Qt root for cmake PREFIX_PATH
-          QT_ROOT=$(python3 -c "
-          import os
-          d = os.environ.get('Qt6_DIR','')
-          for _ in range(3): d = os.path.dirname(d)
-          print(d)
-          ")
-          echo "Qt root: $QT_ROOT"
-          mkdir -p build
-          cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
-            -G Ninja
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
 
       - name: Build
-        run: |
-          cd build
-          ninja -j$(nproc)
+        run: cmake --build build --parallel
 
-      - name: Build .deb
+      - name: Package .deb
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          mkdir -p dist/nothing-browser_${VERSION}_amd64/DEBIAN
-          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/local/bin
-          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/share/applications
-          mkdir -p dist/nothing-browser_${VERSION}_amd64/usr/share/nothing-browser
-          cp build/nothing-browser dist/nothing-browser_${VERSION}_amd64/usr/local/bin/
-          cp assets/icons/logo.svg dist/nothing-browser_${VERSION}_amd64/usr/share/nothing-browser/
-          cat > dist/nothing-browser_${VERSION}_amd64/DEBIAN/control << EOF
+          [ -z "$VERSION" ] && VERSION="dev"
+          PKG="dist/nothing-browser_${VERSION}_amd64"
+          mkdir -p ${PKG}/DEBIAN \
+                   ${PKG}/usr/local/bin \
+                   ${PKG}/usr/share/applications \
+                   ${PKG}/usr/share/nothing-browser
+
+          cp build/nothing-browser ${PKG}/usr/local/bin/
+          cp assets/icons/logo.svg ${PKG}/usr/share/nothing-browser/
+
+          cat > ${PKG}/DEBIAN/control <<EOF
           Package: nothing-browser
           Version: ${VERSION}
           Architecture: amd64
           Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
-          Depends: libqt6webenginewidgets6 | libqt6webenginecore6
-          Description: Nothing Browser - Does nothing... except everything that matters.
+          Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6
+          Description: Nothing Browser — Does nothing, except everything that matters.
           EOF
-          cat > dist/nothing-browser_${VERSION}_amd64/usr/share/applications/nothing-browser.desktop << EOF
+
+          cat > ${PKG}/usr/share/applications/nothing-browser.desktop <<EOF
           [Desktop Entry]
           Name=Nothing Browser
           Exec=/usr/local/bin/nothing-browser
@@ -98,35 +74,34 @@ jobs:
           Type=Application
           Categories=Network;WebBrowser;Development;
           EOF
-          dpkg-deb --build --root-owner-group \
-            dist/nothing-browser_${VERSION}_amd64 \
+
+          dpkg-deb --build --root-owner-group ${PKG} \
             dist/nothing-browser_${VERSION}_amd64.deb
 
-      - name: Build tarball
+      - name: Package tarball
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION="dev"
+          mkdir -p dist
           tar -czf dist/nothing-browser-${VERSION}-linux-x86_64.tar.gz \
             -C build nothing-browser
 
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: linux-build
           path: |
             dist/*.deb
             dist/*.tar.gz
-          retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  WINDOWS
+  #  WINDOWS — find Qt paths explicitly, no env var guessing
   # ═══════════════════════════════════════════════════════════════════════════
   build-windows:
-    name: Build Windows (x64)
+    name: Build Windows
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
@@ -137,63 +112,64 @@ jobs:
           arch: win64_msvc2019_64
           modules: "qtwebengine qtwebchannel qtpositioning"
           cache: true
+          dir: "C:/Qt"
 
-      - name: Configure (MSVC)
+      - name: Find Qt and configure
+        shell: powershell
+        run: |
+          # Find cmake config dir — search under C:\Qt
+          $cmakeDir = Get-ChildItem "C:\Qt" -Recurse -Filter "Qt6Config.cmake" |
+                      Select-Object -First 1 -ExpandProperty DirectoryName
+          Write-Host "Qt cmake dir: $cmakeDir"
+          echo "QT_CMAKE_DIR=$cmakeDir" >> $env:GITHUB_ENV
+
+          # Qt root is 3 levels up from lib\cmake\Qt6
+          $qtRoot = Split-Path (Split-Path (Split-Path $cmakeDir))
+          Write-Host "Qt root: $qtRoot"
+          echo "QT_ROOT=$qtRoot" >> $env:GITHUB_ENV
+          echo "QT_BIN=$qtRoot\bin" >> $env:GITHUB_ENV
+
+      - name: Configure
         shell: cmd
         run: |
           mkdir build-win
           cd build-win
           cmake .. ^
             -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_PREFIX_PATH="%Qt6_DIR%" ^
+            -DCMAKE_PREFIX_PATH="%QT_CMAKE_DIR%" ^
             -G "Visual Studio 17 2022" ^
             -A x64
 
       - name: Build
         shell: cmd
-        run: |
-          cd build-win
-          cmake --build . --config Release --parallel
+        run: cmake --build build-win --config Release --parallel
 
-      - name: Package with windeployqt
+      - name: Package
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
+          if ([string]::IsNullOrEmpty($version)) { $version = "dev" }
 
-          New-Item -ItemType Directory -Force -Path "dist\nothing-browser-win64"
+          New-Item -ItemType Directory -Force "dist\nothing-browser-win64"
           Copy-Item "build-win\Release\nothing-browser.exe" "dist\nothing-browser-win64\"
 
-          # Qt6_DIR is set to the cmake config dir e.g. D:\Qt\6.6.3\msvc2019_64\lib\cmake\Qt6
-          # We need the actual Qt root: go up 3 levels from lib\cmake\Qt6
-          $qtCmakeDir = "$env:Qt6_DIR"
-          $qtRoot = (Get-Item $qtCmakeDir).Parent.Parent.Parent.FullName
-          $qtBin  = Join-Path $qtRoot "bin"
+          $wdqt = "$env:QT_BIN\windeployqt.exe"
+          Write-Host "windeployqt: $wdqt"
 
-          Write-Host "Qt6_DIR  = $qtCmakeDir"
-          Write-Host "Qt root  = $qtRoot"
-          Write-Host "Qt bin   = $qtBin"
-
-          $wdqt = Join-Path $qtBin "windeployqt.exe"
           if (-not (Test-Path $wdqt)) {
-            Write-Error "windeployqt.exe not found at: $wdqt"
-            exit 1
+            # fallback search
+            $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
+                    Select-Object -First 1 -ExpandProperty FullName
+            Write-Host "Found via search: $wdqt"
           }
 
-          & $wdqt `
-            --release `
-            --no-compiler-runtime `
-            "dist\nothing-browser-win64\nothing-browser.exe"
+          & $wdqt --release --no-compiler-runtime "dist\nothing-browser-win64\nothing-browser.exe"
 
-          # Copy WebEngine runtime files windeployqt sometimes misses
-          $webEngineFiles = @(
-            "QtWebEngineProcess.exe",
-            "resources",
-            "translations\qtwebengine_locales"
-          )
-          foreach ($f in $webEngineFiles) {
-            $src = Join-Path $qtRoot $f
+          # Copy WebEngine runtime
+          @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
+            $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) {
-              Write-Host "Copying $src"
+              Write-Host "Copying $_"
               Copy-Item -Recurse -Force $src "dist\nothing-browser-win64\"
             }
           }
@@ -202,23 +178,20 @@ jobs:
             -Path "dist\nothing-browser-win64\*" `
             -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
 
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: dist\*.zip
-          retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  MACOS
+  #  MACOS — already working, just clean up path resolution
   # ═══════════════════════════════════════════════════════════════════════════
   build-macos:
     name: Build macOS
     runs-on: macos-14
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
@@ -229,184 +202,114 @@ jobs:
           arch: clang_64
           modules: "qtwebengine qtwebchannel qtpositioning"
           cache: true
+          dir: "${{ github.workspace }}/Qt"
+
+      - name: Find Qt root
+        run: |
+          QT_ROOT=$(find ${{ github.workspace }}/Qt -name "macdeployqt" -type f | head -1 | xargs dirname | xargs dirname)
+          echo "QT_ROOT=$QT_ROOT" >> $GITHUB_ENV
+          echo "QT_BIN=$QT_ROOT/bin" >> $GITHUB_ENV
+          echo "Qt root: $QT_ROOT"
 
       - name: Configure
         run: |
-          QT_ROOT=$(python3 -c "
-          import os
-          d = os.environ.get('Qt6_DIR','')
-          for _ in range(3): d = os.path.dirname(d)
-          print(d)
-          ")
-          echo "Qt root: $QT_ROOT"
           mkdir -p build-mac
-          cd build-mac
-          cmake .. \
+          cmake -B build-mac \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
-            -DMACOSX_BUNDLE=ON \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT" \
             -DCMAKE_MACOSX_BUNDLE=ON
 
-      - name: Patch CMakeLists for bundle
-        run: |
-          QT_ROOT=$(python3 -c "
-          import os
-          d = os.environ.get('Qt6_DIR','')
-          for _ in range(3): d = os.path.dirname(d)
-          print(d)
-          ")
-          cd build-mac
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
-            -DCMAKE_EXE_LINKER_FLAGS="-framework Cocoa"
-
       - name: Build
-        run: |
-          cd build-mac
-          make -j$(sysctl -n hw.ncpu)
+        run: cmake --build build-mac --parallel
 
-      - name: Create .app bundle manually if needed
+      - name: Package .dmg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist
 
-          # Check if .app was produced, if not create it manually
+          # Find or create .app
           if [ -d "build-mac/nothing-browser.app" ]; then
-            echo "Bundle exists, using it directly"
-            APP_PATH="build-mac/nothing-browser.app"
+            APP="build-mac/nothing-browser.app"
           else
-            echo "No .app found — wrapping binary into bundle manually"
-            APP_PATH="build-mac/nothing-browser.app"
-            mkdir -p "${APP_PATH}/Contents/MacOS"
-            mkdir -p "${APP_PATH}/Contents/Resources"
-            cp build-mac/nothing-browser "${APP_PATH}/Contents/MacOS/"
-            cat > "${APP_PATH}/Contents/Info.plist" << EOF
+            APP="build-mac/nothing-browser.app"
+            mkdir -p "${APP}/Contents/MacOS"
+            cp build-mac/nothing-browser "${APP}/Contents/MacOS/"
+            cat > "${APP}/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>CFBundleExecutable</key>  <string>nothing-browser</string>
-            <key>CFBundleIdentifier</key> <string>dev.nothingbrowser.app</string>
-            <key>CFBundleName</key>       <string>Nothing Browser</string>
-            <key>CFBundleVersion</key>    <string>${VERSION}</string>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>nothing-browser</string>
+            <key>CFBundleIdentifier</key><string>dev.nothingbrowser.app</string>
+            <key>CFBundleName</key><string>Nothing Browser</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>NSHighResolutionCapable</key><true/>
-          </dict>
-          </plist>
+          </dict></plist>
           EOF
           fi
 
-          # Qt6_DIR points to cmake config dir — resolve actual Qt root
-          QT_ROOT=$(python3 -c "
-          import os, sys
-          d = os.environ.get('Qt6_DIR','')
-          # go up from lib/cmake/Qt6 → lib/cmake → lib → Qt root
-          for _ in range(3):
-              d = os.path.dirname(d)
-          print(d)
-          ")
-          MACDEPLOYQT="${QT_ROOT}/bin/macdeployqt"
-          echo "Qt root:      $QT_ROOT"
-          echo "macdeployqt:  $MACDEPLOYQT"
-
-          if [ ! -f "$MACDEPLOYQT" ]; then
-            # fallback: search common locations
-            MACDEPLOYQT=$(find /Users/runner/work -name "macdeployqt" -type f 2>/dev/null | head -1)
-            echo "Fallback macdeployqt: $MACDEPLOYQT"
-          fi
-
-          # Run macdeployqt to bundle Qt libs + make .dmg
-          "$MACDEPLOYQT" "${APP_PATH}" \
-            -dmg \
-            -always-overwrite
+          "$QT_BIN/macdeployqt" "$APP" -dmg -always-overwrite
           mv build-mac/nothing-browser.dmg \
             dist/nothing-browser-${VERSION}-macos.dmg
 
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: macos-build
           path: dist/*.dmg
-          retention-days: 7
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  RELEASE — publish all artifacts
+  #  RELEASE
   # ═══════════════════════════════════════════════════════════════════════════
   release:
     name: Publish Release
     needs: [build-linux, build-windows, build-macos]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
-      - name: List artifacts
-        run: find release-artifacts -type f
-
-      - name: Read changelog from version.json
+      - name: Read changelog
         id: changelog
         run: |
-          NOTES=$(python3 - << 'PYEOF'
+          NOTES=$(python3 -c "
           import json
-          with open("version.json") as f:
-              data = json.load(f)
-          lines = []
-          for e in data.get("changelog", []):
-              t = e["type"]
-              tag = "[+]" if t == "added" else "[F]" if t == "fix" else "[→]"
-              lines.append(f"{tag} {e['text']}")
-          print("\n".join(lines))
-          PYEOF
-          )
+          data = json.load(open('version.json'))
+          icons = {'added':'[+]','fix':'[F]','coming':'[→]'}
+          print('\n'.join(icons.get(e['type'],'[*]')+' '+e['text'] for e in data.get('changelog',[])))
+          ")
           echo "NOTES<<EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           name: "Nothing Browser ${{ github.ref_name }}"
           body: |
             ## Nothing Browser ${{ github.ref_name }}
-
             > Does nothing... except everything that matters.
 
-            ### What changed
+            ### Changes
             ${{ steps.changelog.outputs.NOTES }}
 
             ---
-
-            ### Install
-
-            **Linux — one line:**
+            **Linux:**
             ```bash
             curl -fsSL https://raw.githubusercontent.com/BunElysiaReact/nothing-browser/main/install.sh | sudo bash
             ```
-
-            **Debian/Ubuntu .deb:**
-            ```bash
-            sudo dpkg -i nothing-browser_*_amd64.deb
-            ```
-
             **Windows:** Download `.zip` → extract → run `nothing-browser.exe`
-
-            **macOS:** Download `.dmg` → open → drag to Applications
+            **macOS:** Download `.dmg` → drag to Applications
           files: |
             release-artifacts/linux-build/*.deb
             release-artifacts/linux-build/*.tar.gz
             release-artifacts/windows-build/*.zip
             release-artifacts/macos-build/*.dmg
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
