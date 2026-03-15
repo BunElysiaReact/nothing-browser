@@ -52,11 +52,20 @@ jobs:
 
       - name: Configure
         run: |
+          # jurplel/install-qt-action sets Qt6_DIR to the cmake config dir
+          # resolve actual Qt root for cmake PREFIX_PATH
+          QT_ROOT=$(python3 -c "
+          import os
+          d = os.environ.get('Qt6_DIR','')
+          for _ in range(3): d = os.path.dirname(d)
+          print(d)
+          ")
+          echo "Qt root: $QT_ROOT"
           mkdir -p build
           cd build
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
             -G Ninja
 
       - name: Build
@@ -150,26 +159,45 @@ jobs:
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
+
           New-Item -ItemType Directory -Force -Path "dist\nothing-browser-win64"
           Copy-Item "build-win\Release\nothing-browser.exe" "dist\nothing-browser-win64\"
-          $qtBin = "$env:Qt6_DIR\bin"
-          # --webengine flag was removed in Qt6 windeployqt — it deploys WebEngine automatically
-          & "$qtBin\windeployqt.exe" `
+
+          # Qt6_DIR is set to the cmake config dir e.g. D:\Qt\6.6.3\msvc2019_64\lib\cmake\Qt6
+          # We need the actual Qt root: go up 3 levels from lib\cmake\Qt6
+          $qtCmakeDir = "$env:Qt6_DIR"
+          $qtRoot = (Get-Item $qtCmakeDir).Parent.Parent.Parent.FullName
+          $qtBin  = Join-Path $qtRoot "bin"
+
+          Write-Host "Qt6_DIR  = $qtCmakeDir"
+          Write-Host "Qt root  = $qtRoot"
+          Write-Host "Qt bin   = $qtBin"
+
+          $wdqt = Join-Path $qtBin "windeployqt.exe"
+          if (-not (Test-Path $wdqt)) {
+            Write-Error "windeployqt.exe not found at: $wdqt"
+            exit 1
+          }
+
+          & $wdqt `
             --release `
             --no-compiler-runtime `
             "dist\nothing-browser-win64\nothing-browser.exe"
-          # Manually copy WebEngine process binaries (windeployqt misses these sometimes)
+
+          # Copy WebEngine runtime files windeployqt sometimes misses
           $webEngineFiles = @(
             "QtWebEngineProcess.exe",
             "resources",
             "translations\qtwebengine_locales"
           )
           foreach ($f in $webEngineFiles) {
-            $src = Join-Path $env:Qt6_DIR $f
+            $src = Join-Path $qtRoot $f
             if (Test-Path $src) {
+              Write-Host "Copying $src"
               Copy-Item -Recurse -Force $src "dist\nothing-browser-win64\"
             }
           }
+
           Compress-Archive `
             -Path "dist\nothing-browser-win64\*" `
             -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
@@ -204,27 +232,34 @@ jobs:
 
       - name: Configure
         run: |
+          QT_ROOT=$(python3 -c "
+          import os
+          d = os.environ.get('Qt6_DIR','')
+          for _ in range(3): d = os.path.dirname(d)
+          print(d)
+          ")
+          echo "Qt root: $QT_ROOT"
           mkdir -p build-mac
           cd build-mac
-          # MACOSX_BUNDLE=ON makes CMake produce a proper .app bundle
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
             -DMACOSX_BUNDLE=ON \
             -DCMAKE_MACOSX_BUNDLE=ON
 
       - name: Patch CMakeLists for bundle
-        # If main.cpp doesn't set MACOSX_BUNDLE, force it via cmake property
         run: |
+          QT_ROOT=$(python3 -c "
+          import os
+          d = os.environ.get('Qt6_DIR','')
+          for _ in range(3): d = os.path.dirname(d)
+          print(d)
+          ")
           cd build-mac
           cmake .. \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="${Qt6_DIR}" \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT}" \
             -DCMAKE_EXE_LINKER_FLAGS="-framework Cocoa"
-          # Patch the target to be a bundle
-          cat >> CMakeCache.txt << 'EOF'
-          nothing-browser_MACOSX_BUNDLE:BOOL=ON
-          EOF
 
       - name: Build
         run: |
@@ -263,8 +298,27 @@ jobs:
           EOF
           fi
 
+          # Qt6_DIR points to cmake config dir — resolve actual Qt root
+          QT_ROOT=$(python3 -c "
+          import os, sys
+          d = os.environ.get('Qt6_DIR','')
+          # go up from lib/cmake/Qt6 → lib/cmake → lib → Qt root
+          for _ in range(3):
+              d = os.path.dirname(d)
+          print(d)
+          ")
+          MACDEPLOYQT="${QT_ROOT}/bin/macdeployqt"
+          echo "Qt root:      $QT_ROOT"
+          echo "macdeployqt:  $MACDEPLOYQT"
+
+          if [ ! -f "$MACDEPLOYQT" ]; then
+            # fallback: search common locations
+            MACDEPLOYQT=$(find /Users/runner/work -name "macdeployqt" -type f 2>/dev/null | head -1)
+            echo "Fallback macdeployqt: $MACDEPLOYQT"
+          fi
+
           # Run macdeployqt to bundle Qt libs + make .dmg
-          ${Qt6_DIR}/bin/macdeployqt "${APP_PATH}" \
+          "$MACDEPLOYQT" "${APP_PATH}" \
             -dmg \
             -always-overwrite
           mv build-mac/nothing-browser.dmg \
