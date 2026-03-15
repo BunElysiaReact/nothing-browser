@@ -1,5 +1,8 @@
 name: Build & Release
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     tags:
@@ -38,7 +41,7 @@ jobs:
             ninja-build
 
       - name: Install Qt6 via aqt
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.0"
           host: linux
@@ -117,7 +120,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Qt6
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.0"
           host: windows
@@ -150,11 +153,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path "dist\nothing-browser-win64"
           Copy-Item "build-win\Release\nothing-browser.exe" "dist\nothing-browser-win64\"
           $qtBin = "$env:Qt6_DIR\bin"
+          # --webengine flag was removed in Qt6 windeployqt — it deploys WebEngine automatically
           & "$qtBin\windeployqt.exe" `
             --release `
             --no-compiler-runtime `
-            --webengine `
             "dist\nothing-browser-win64\nothing-browser.exe"
+          # Manually copy WebEngine process binaries (windeployqt misses these sometimes)
+          $webEngineFiles = @(
+            "QtWebEngineProcess.exe",
+            "resources",
+            "translations\qtwebengine_locales"
+          )
+          foreach ($f in $webEngineFiles) {
+            $src = Join-Path $env:Qt6_DIR $f
+            if (Test-Path $src) {
+              Copy-Item -Recurse -Force $src "dist\nothing-browser-win64\"
+            }
+          }
           Compress-Archive `
             -Path "dist\nothing-browser-win64\*" `
             -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
@@ -178,7 +193,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Qt6
-        uses: jurplel/install-qt-action@v3
+        uses: jurplel/install-qt-action@v4
         with:
           version: "6.7.0"
           host: mac
