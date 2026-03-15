@@ -15,7 +15,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   build-linux:
     name: Build Linux
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,7 @@ jobs:
             qt6-webengine-dev \
             libqt6webenginewidgets6 \
             libqt6webenginecore6 \
+            qt6-webengine-dev-tools \
             libgl-dev \
             libegl-dev \
             libglu1-mesa-dev \
