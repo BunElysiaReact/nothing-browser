@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QUrl>
 #include <QScrollArea>
 #include <QFileDialog>
@@ -315,16 +316,22 @@ QString DevToolsPanel::buildSummaryBlock(const NetEntry &e) const {
                .arg(e.method)
                .arg(u.path().isEmpty() ? "/" : u.path())
                .arg(e.status.isEmpty() ? "—" : e.status);
-    out += QString("%-26 %2\n").arg("Scheme").arg(u.scheme());
-    out += QString("%-26 %2\n").arg("Host").arg(u.host());
-    out += QString("%-26 %2\n").arg("Filename").arg(u.path());
+
+    auto row = [](const QString &k, const QString &v) {
+        return QString("%1%2\n")
+            .arg(k.leftJustified(26, ' '))
+            .arg(v);
+    };
+
+    out += row("Scheme",          u.scheme());
+    out += row("Host",            u.host());
+    out += row("Filename",        u.path());
     if (!u.query().isEmpty())
-        out += QString("%-26 %2\n").arg("Query string").arg(u.query());
-    out += QString("%-26 %2\n").arg("Status").arg(e.status.isEmpty() ? "—" : e.status);
-    out += QString("%-26 %2\n").arg("MIME type").arg(e.mime.isEmpty() ? "—" : e.mime);
-    out += QString("%-26 %2\n").arg("Referrer Policy")
-               .arg("strict-origin-when-cross-origin");
-    out += QString("%-26 %2\n").arg("DNS Resolution").arg("System");
+        out += row("Query string", u.query());
+    out += row("Status",          e.status.isEmpty() ? "—" : e.status);
+    out += row("MIME type",       e.mime.isEmpty()   ? "—" : e.mime);
+    out += row("Referrer Policy", "strict-origin-when-cross-origin");
+    out += row("DNS Resolution",  "System");
     return out;
 }
 
@@ -603,17 +610,22 @@ QWidget *DevToolsPanel::buildWsTab() {
     auto *copyBar = new QWidget; copyBar->setFixedHeight(32);
     copyBar->setStyleSheet("background:#090909; border-bottom:1px solid #1a1a1a;");
     auto *cbl = new QHBoxLayout(copyBar); cbl->setContentsMargins(6,2,6,2); cbl->setSpacing(4);
-    auto *bCp = btn("COPY FRAME", "#888888", copyBar);
-    auto *bDl = btn("DOWNLOAD",   "#ffaa00", copyBar);
-    connect(bCp, &QPushButton::clicked, this, [this](){ clip(m_wsDetail->toPlainText()); });
+    auto *bCp   = btn("COPY FRAME",    "#888888", copyBar);
+    auto *bDl   = btn("DOWNLOAD",      "#ffaa00", copyBar);
+
+    connect(bCp, &QPushButton::clicked, this,
+            [this](){ clip(m_wsDetail->toPlainText()); });
+
     connect(bDl, &QPushButton::clicked, this, [this](){
         QString path = QFileDialog::getSaveFileName(
             this, "Save WS Frame", QDir::homePath() + "/ws_frame.txt",
-            "Text Files (*.txt);;All Files (*)");
+            "Text Files (*.txt);;JSON (*.json);;All Files (*)");
         if (path.isEmpty()) return;
-        QFile f(path); if (!f.open(QIODevice::WriteOnly|QIODevice::Text)) return;
+        QFile f(path);
+        if (!f.open(QIODevice::WriteOnly|QIODevice::Text)) return;
         QTextStream(&f) << m_wsDetail->toPlainText();
     });
+
     cbl->addWidget(bCp); cbl->addWidget(bDl); cbl->addStretch();
 
     m_wsDetail = new QTextEdit(rp);
@@ -847,20 +859,44 @@ void DevToolsPanel::onRawRequest(const QString &method, const QString &url,
 void DevToolsPanel::onWsFrame(const WebSocketFrame &frame) {
     QColor dc = frame.direction.contains("SENT") ? QColor("#ff8800")
               : frame.direction.contains("RECV") ? QColor("#00cc66")
-              : frame.direction=="OPEN"          ? QColor("#0088ff") : QColor("#444");
+              : frame.direction == "OPEN"        ? QColor("#0088ff")
+                                                 : QColor("#444");
+
+    // Preview — for binary show hex preview, for text show content
+    QString preview;
+    if (frame.isBinary && !frame.data.isEmpty()
+        && !frame.data.startsWith("[")) {
+        // Convert first bytes of base64 to hex for preview
+        QByteArray raw = QByteArray::fromBase64(frame.data.toUtf8());
+        QString hex;
+        int previewBytes = qMin(raw.size(), 16);
+        for (int i = 0; i < previewBytes; i++)
+            hex += QString("%1 ").arg((unsigned char)raw[i], 2, 16, QChar('0'));
+        preview = QString("[Binary %1b] %2...").arg(raw.size()).arg(hex.trimmed());
+    } else {
+        preview = frame.data.left(90).replace('\n', ' ');
+    }
+
     int row = m_wsTable->rowCount();
-    m_wsTable->insertRow(row); m_wsTable->setRowHeight(row,20);
-    m_wsTable->setItem(row,0,makeItem(frame.direction,dc));
-    m_wsTable->setItem(row,1,makeItem(QString::number(frame.data.size())+"b",QColor("#444")));
-    m_wsTable->setItem(row,2,makeItem(frame.timestamp,QColor("#333")));
-    auto *it = makeItem(frame.data.left(90).replace('\n',' '));
-    it->setData(Qt::UserRole,  frame.data);
-    it->setData(Qt::UserRole+1,frame.url);
-    m_wsTable->setItem(row,3,it);
+    m_wsTable->insertRow(row);
+    m_wsTable->setRowHeight(row, 20);
+    m_wsTable->setItem(row, 0, makeItem(frame.direction, dc));
+    m_wsTable->setItem(row, 1,
+        makeItem(QString::number(frame.isBinary ?
+            QByteArray::fromBase64(frame.data.toUtf8()).size() :
+            frame.data.size()) + "b", QColor("#444")));
+    m_wsTable->setItem(row, 2, makeItem(frame.timestamp, QColor("#333")));
+
+    auto *it = makeItem(preview);
+    it->setData(Qt::UserRole,   frame.data);      // raw data (base64 if binary)
+    it->setData(Qt::UserRole+1, frame.url);
+    it->setData(Qt::UserRole+2, frame.isBinary);  // binary flag
+    m_wsTable->setItem(row, 3, it);
+
     m_wsFrames.append(frame);
     m_wsTotal++;
     m_wsCount->setText(QString("FRAMES: %1").arg(m_wsTotal));
-    updateTabLabel(1,"WS",m_wsTotal);
+    updateTabLabel(1, "WS", m_wsTotal);
     m_wsTable->scrollToBottom();
 }
 
@@ -928,11 +964,61 @@ void DevToolsPanel::onNetworkRowSelected(int row, int) {
 }
 
 void DevToolsPanel::onWsRowSelected(int row, int) {
-    auto *it = m_wsTable->item(row,3); if (!it) return;
-    QString data = it->data(Qt::UserRole).toString();
-    QString url  = it->data(Qt::UserRole+1).toString();
-    QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8());
-    m_wsDetail->setPlainText("URL: "+url+"\n\n"+(doc.isNull()?data:doc.toJson(QJsonDocument::Indented)));
+    auto *it = m_wsTable->item(row, 3); if (!it) return;
+    QString data    = it->data(Qt::UserRole).toString();
+    QString url     = it->data(Qt::UserRole+1).toString();
+    bool    isBinary = it->data(Qt::UserRole+2).toBool();
+
+    QString out = "URL: " + url + "\n";
+    out += "Direction: " + m_wsTable->item(row,0)->text() + "\n";
+    out += "Time:      " + m_wsTable->item(row,2)->text() + "\n\n";
+
+    if (isBinary && !data.isEmpty() && !data.startsWith("[")) {
+        QByteArray raw = QByteArray::fromBase64(data.toUtf8());
+        out += QString("── Binary Frame: %1 bytes ──────────────────\n\n")
+                   .arg(raw.size());
+
+        // Hex dump — first 256 bytes
+        out += "── Hex Dump (first 256 bytes) ───────────────\n";
+        QString hexLine, asciiLine;
+        int limit = qMin(raw.size(), 256);
+        for (int i = 0; i < limit; i++) {
+            unsigned char b = (unsigned char)raw[i];
+            hexLine  += QString("%1 ").arg(b, 2, 16, QChar('0'));
+            asciiLine += (b >= 32 && b < 127) ? QChar(b) : QChar('.');
+            if ((i+1) % 16 == 0) {
+                out += QString("%1  %2  %3\n")
+                           .arg(QString::number(i-15, 16).rightJustified(4,'0'))
+                           .arg(hexLine.leftJustified(48))
+                           .arg(asciiLine);
+                hexLine.clear(); asciiLine.clear();
+            }
+        }
+        if (!hexLine.isEmpty())
+            out += QString("%1  %2  %3\n")
+                       .arg(QString::number(limit - hexLine.count(' '), 16)
+                                .rightJustified(4,'0'))
+                       .arg(hexLine.leftJustified(48))
+                       .arg(asciiLine);
+
+        if (raw.size() > 256)
+            out += QString("\n... %1 more bytes (use DOWNLOAD to get full frame)\n")
+                       .arg(raw.size() - 256);
+
+        // Store base64 for copy/download
+        m_wsDetail->setProperty("rawBase64", data);
+
+    } else if (isBinary) {
+        out += "[Binary frame — data capture incomplete]\n";
+        out += "Reload the page with Nothing Browser open to capture properly\n";
+    } else {
+        // Text frame — try JSON pretty print
+        out += "── Content ──────────────────────────────────\n";
+        QJsonDocument doc = QJsonDocument::fromJson(data.toUtf8());
+        out += doc.isNull() ? data : doc.toJson(QJsonDocument::Indented);
+    }
+
+    m_wsDetail->setPlainText(out);
 }
 
 void DevToolsPanel::onCookieRowSelected(int row, int) {
@@ -1060,4 +1146,151 @@ void DevToolsPanel::downloadSelected() {
         out << "── Response Body ────────────────────────────\n";
         out << e.body << "\n";
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Session export / import
+// ─────────────────────────────────────────────────────────────────────────────
+bool DevToolsPanel::exportSession(const QString &path) {
+    QJsonObject root;
+
+    // Meta
+    root["saved_at"]   = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    root["url"]        = m_currentUrl;
+    root["nb_version"] = "0.1.0";
+
+    // Network captures
+    QJsonArray netArr;
+    for (auto &e : m_netEntries) {
+        QJsonObject o;
+        o["method"]      = e.method;
+        o["url"]         = e.url;
+        o["status"]      = e.status;
+        o["type"]        = e.type;
+        o["mime"]        = e.mime;
+        o["reqHeaders"]  = e.reqHeaders;
+        o["resHeaders"]  = e.resHeaders;
+        o["body"]        = e.body;
+        netArr.append(o);
+    }
+    root["captures"] = netArr;
+
+    // WebSocket frames
+    QJsonArray wsArr;
+    for (auto &f : m_wsFrames) {
+        QJsonObject o;
+        o["url"]       = f.url;
+        o["direction"] = f.direction;
+        o["data"]      = f.data;
+        o["binary"]    = f.isBinary;
+        o["timestamp"] = f.timestamp;
+        wsArr.append(o);
+    }
+    root["ws_frames"] = wsArr;
+
+    // Cookies
+    QJsonArray cookieArr;
+    for (auto &e : m_cookieEntries) {
+        QJsonObject o;
+        o["name"]     = e.cookie.name;
+        o["value"]    = e.cookie.value;
+        o["domain"]   = e.cookie.domain;
+        o["path"]     = e.cookie.path;
+        o["httpOnly"] = e.cookie.httpOnly;
+        o["secure"]   = e.cookie.secure;
+        o["expires"]  = e.cookie.expires;
+        cookieArr.append(o);
+    }
+    root["cookies"] = cookieArr;
+
+    // Storage entries
+    QJsonObject storageObj;
+    QJsonObject lsObj, ssObj;
+    for (int r = 0; r < m_storageTable->rowCount(); r++) {
+        auto *typeItem = m_storageTable->item(r, 0);
+        auto *keyItem  = m_storageTable->item(r, 2);
+        auto *valItem  = m_storageTable->item(r, 3);
+        if (!typeItem || !keyItem || !valItem) continue;
+        QString fullVal = valItem->data(Qt::UserRole).toString();
+        if (typeItem->text() == "localStorage")
+            lsObj[keyItem->text()] = fullVal;
+        else
+            ssObj[keyItem->text()] = fullVal;
+    }
+    storageObj["localStorage"]   = lsObj;
+    storageObj["sessionStorage"] = ssObj;
+    root["storage"] = storageObj;
+
+    // Write
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) return false;
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    m_lastSessionPath = path;
+    return true;
+}
+
+bool DevToolsPanel::importSession(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    if (!doc.isObject()) return false;
+
+    // Clear current state
+    clearAll();
+
+    QJsonObject root = doc.object();
+    m_currentUrl = root["url"].toString();
+
+    // Restore network captures
+    for (auto v : root["captures"].toArray()) {
+        CapturedRequest req;
+        QJsonObject o = v.toObject();
+        req.method          = o["method"].toString();
+        req.url             = o["url"].toString();
+        req.status          = o["status"].toString();
+        req.type            = o["type"].toString();
+        req.mimeType        = o["mime"].toString();
+        req.requestHeaders  = o["reqHeaders"].toString();
+        req.responseHeaders = o["resHeaders"].toString();
+        req.responseBody    = o["body"].toString();
+        onRequestCaptured(req);
+    }
+
+    // Restore WS frames
+    for (auto v : root["ws_frames"].toArray()) {
+        WebSocketFrame f;
+        QJsonObject o = v.toObject();
+        f.url       = o["url"].toString();
+        f.direction = o["direction"].toString();
+        f.data      = o["data"].toString();
+        f.isBinary  = o["binary"].toBool();
+        f.timestamp = o["timestamp"].toString();
+        onWsFrame(f);
+    }
+
+    // Restore cookies
+    for (auto v : root["cookies"].toArray()) {
+        CapturedCookie c;
+        QJsonObject o = v.toObject();
+        c.name     = o["name"].toString();
+        c.value    = o["value"].toString();
+        c.domain   = o["domain"].toString();
+        c.path     = o["path"].toString();
+        c.httpOnly = o["httpOnly"].toBool();
+        c.secure   = o["secure"].toBool();
+        c.expires  = o["expires"].toString();
+        onCookieCaptured(c);
+    }
+
+    // Restore storage
+    QJsonObject storage = root["storage"].toObject();
+    auto restoreStorage = [&](const QJsonObject &obj, const QString &type) {
+        for (auto it = obj.begin(); it != obj.end(); ++it)
+            onStorageCaptured("(restored)", it.key(), it.value().toString(), type);
+    };
+    restoreStorage(storage["localStorage"].toObject(),   "localStorage");
+    restoreStorage(storage["sessionStorage"].toObject(), "sessionStorage");
+
+    m_lastSessionPath = path;
+    return true;
 }

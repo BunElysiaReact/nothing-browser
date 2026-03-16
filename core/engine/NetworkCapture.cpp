@@ -21,23 +21,15 @@ void NetworkCapture::attachToPage(QWebEnginePage *page, QWebEngineProfile *profi
     connect(store, &QWebEngineCookieStore::cookieRemoved,
             this,  &NetworkCapture::onCookieRemoved);
 
-    QWebEngineScript s;
-    s.setName("nothing_capture");
-    s.setSourceCode(captureScript());
-    s.setInjectionPoint(QWebEngineScript::DocumentCreation);
-    s.setWorldId(QWebEngineScript::MainWorld);
-    s.setRunsOnSubFrames(true);
-    profile->scripts()->insert(s);
-
     auto *timer = new QTimer(this);
     connect(timer, &QTimer::timeout, this, [this]() {
         if (!m_page) return;
         m_page->runJavaScript(
             "(function(){"
-            "  var q = window.__NOTHING_QUEUE__;"
-            "  if(!q || q.length===0) return '[]';"
-            "  var out = JSON.stringify(q);"
-            "  window.__NOTHING_QUEUE__ = [];"
+            "  var q=window.__NOTHING_QUEUE__;"
+            "  if(!q||q.length===0) return '[]';"
+            "  var out=JSON.stringify(q);"
+            "  window.__NOTHING_QUEUE__=[];"
             "  return out;"
             "})()",
             [this](const QVariant &result) {
@@ -140,19 +132,27 @@ window.__NOTHING_CAPTURE_INIT__ = true;
 window.__NOTHING_QUEUE__ = [];
 
 var push = function(obj) { window.__NOTHING_QUEUE__.push(obj); };
-var uid  = function() { return Math.random().toString(36).slice(2,10) + Date.now().toString(36); };
+var uid  = function() { return Math.random().toString(36).slice(2,10)+Date.now().toString(36); };
 
+function bufToB64(buf) {
+    var bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    var bin = '';
+    for (var i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+}
+
+// fetch
 var _fetch = window.fetch;
 window.fetch = function(input, init) {
-    var id     = uid();
-    var url    = (typeof input === 'string') ? input : (input.url || String(input));
+    var id = uid();
+    var url = typeof input === 'string' ? input : (input.url || String(input));
     var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
     var reqHdrs = '';
-    try { reqHdrs = JSON.stringify((init && init.headers) ? init.headers : {}); } catch(e){}
+    try { reqHdrs = JSON.stringify((init && init.headers) ? init.headers : {}); } catch(e) {}
     push({ type:'request', id:id, method:method, url:url, reqType:'Fetch', reqHeaders:reqHdrs });
     return _fetch.apply(this, arguments).then(function(resp) {
         var status = resp.status;
-        var mime   = resp.headers.get('content-type') || '';
+        var mime = resp.headers.get('content-type') || '';
         resp.clone().text().then(function(body) {
             push({ type:'response', id:id, method:method, url:url, reqType:'Fetch',
                    status:String(status), mime:mime, body:body.slice(0,8000),
@@ -162,14 +162,13 @@ window.fetch = function(input, init) {
     });
 };
 
-var _open   = XMLHttpRequest.prototype.open;
-var _send   = XMLHttpRequest.prototype.send;
+// XHR
+var _open = XMLHttpRequest.prototype.open;
+var _send = XMLHttpRequest.prototype.send;
 var _setHdr = XMLHttpRequest.prototype.setRequestHeader;
 XMLHttpRequest.prototype.open = function(method, url) {
-    this.__n_id__     = uid();
-    this.__n_method__ = method.toUpperCase();
-    this.__n_url__    = url;
-    this.__n_hdrs__   = {};
+    this.__n_id__ = uid(); this.__n_method__ = method.toUpperCase();
+    this.__n_url__ = url; this.__n_hdrs__ = {};
     return _open.apply(this, arguments);
 };
 XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
@@ -178,13 +177,12 @@ XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
 };
 XMLHttpRequest.prototype.send = function(body) {
     var self = this;
-    var id = self.__n_id__, method = self.__n_method__ || 'GET', url = self.__n_url__ || '';
+    var id = self.__n_id__, method = self.__n_method__||'GET', url = self.__n_url__||'';
     var reqHdrs = '';
-    try { reqHdrs = JSON.stringify(self.__n_hdrs__ || {}); } catch(e){}
+    try { reqHdrs = JSON.stringify(self.__n_hdrs__||{}); } catch(e) {}
     push({ type:'request', id:id, method:method, url:url, reqType:'XHR', reqHeaders:reqHdrs });
     self.addEventListener('load', function() {
-        var text = '';
-        try { text = self.responseText || ''; } catch(e){}
+        var text = ''; try { text = self.responseText||''; } catch(e) {}
         push({ type:'response', id:id, method:method, url:url, reqType:'XHR',
                status:String(self.status), mime:self.getResponseHeader('content-type')||'',
                body:text.slice(0,8000), size:text.length, reqHeaders:reqHdrs, resHeaders:'' });
@@ -192,23 +190,34 @@ XMLHttpRequest.prototype.send = function(body) {
     return _send.apply(this, arguments);
 };
 
+// WebSocket — full binary capture
 var _WS = window.WebSocket;
 window.WebSocket = function(url, protocols) {
     var id = uid();
     var ws = protocols ? new _WS(url, protocols) : new _WS(url);
+    ws.binaryType = 'arraybuffer';
     push({ type:'ws_open', id:id, url:url });
     var _wsSend = ws.send.bind(ws);
     ws.send = function(data) {
-        var isBin = (data instanceof ArrayBuffer || data instanceof Blob);
-        push({ type:'ws_send', id:id, url:url,
-               data:isBin ? '[Binary '+(data.byteLength||0)+' bytes]' : String(data).slice(0,4000),
-               binary:isBin });
+        if (data instanceof ArrayBuffer)
+            push({ type:'ws_send', id:id, url:url, data:bufToB64(data), binary:true });
+        else if (data instanceof Blob) {
+            var fr = new FileReader();
+            fr.onload = function() { push({ type:'ws_send', id:id, url:url, data:bufToB64(fr.result), binary:true }); };
+            fr.readAsArrayBuffer(data);
+        } else
+            push({ type:'ws_send', id:id, url:url, data:String(data).slice(0,8000), binary:false });
         return _wsSend(data);
     };
     ws.addEventListener('message', function(e) {
-        var isBin = (e.data instanceof ArrayBuffer || e.data instanceof Blob);
-        push({ type:'ws_recv', id:id, url:url,
-               data:isBin ? '[Binary]' : String(e.data).slice(0,4000), binary:isBin });
+        if (e.data instanceof ArrayBuffer)
+            push({ type:'ws_recv', id:id, url:url, data:bufToB64(e.data), binary:true });
+        else if (e.data instanceof Blob) {
+            var fr = new FileReader();
+            fr.onload = function() { push({ type:'ws_recv', id:id, url:url, data:bufToB64(fr.result), binary:true }); };
+            fr.readAsArrayBuffer(e.data);
+        } else
+            push({ type:'ws_recv', id:id, url:url, data:String(e.data).slice(0,8000), binary:false });
     });
     ws.addEventListener('close', function(e) {
         push({ type:'ws_close', id:id, url:url, code:e.code, reason:e.reason });
@@ -221,6 +230,7 @@ window.WebSocket.OPEN       = _WS.OPEN;
 window.WebSocket.CLOSING    = _WS.CLOSING;
 window.WebSocket.CLOSED     = _WS.CLOSED;
 
+// localStorage / sessionStorage
 function wrapStorage(store, label) {
     var _si = store.setItem.bind(store);
     store.setItem = function(key, value) {
@@ -229,8 +239,8 @@ function wrapStorage(store, label) {
         return _si(key, value);
     };
 }
-try { wrapStorage(window.localStorage,   'localStorage');   } catch(e){}
-try { wrapStorage(window.sessionStorage, 'sessionStorage'); } catch(e){}
+try { wrapStorage(window.localStorage,   'localStorage');   } catch(e) {}
+try { wrapStorage(window.sessionStorage, 'sessionStorage'); } catch(e) {}
 
 })();
 )JS";

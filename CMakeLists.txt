@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 project(NothingBrowser)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Widgets WebEngineWidgets WebEngineCore Network)
+    Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
+
+find_package(OpenSSL REQUIRED)
 
 add_executable(nothing-browser
     core/main.cpp
@@ -18,11 +21,27 @@ add_executable(nothing-browser
     core/engine/FingerprintSpoofer.cpp
     core/engine/NetworkCapture.cpp
     core/engine/UpdateChecker.cpp
+    core/engine/IdentityGenerator.cpp
+    core/engine/IdentityStore.cpp
+    assets/resources.qrc
 )
 
 target_include_directories(nothing-browser PRIVATE
-    core core/app core/tabs core/engine core/bridge)
+    core
+    core/app
+    core/tabs
+    core/engine
+    core/bridge
+)
 
 target_link_libraries(nothing-browser
-    Qt6::Core Qt6::Gui Qt6::Widgets
-    Qt6::WebEngineWidgets Qt6::WebEngineCore Qt6::Network)
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::WebEngineWidgets
+    Qt6::WebEngineCore
+    Qt6::Network
+    Qt6::OpenGL
+    OpenSSL::SSL
+    OpenSSL::Crypto
+)

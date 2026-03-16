@@ -14,11 +14,12 @@ class BrowserTab : public QWidget {
 public:
     explicit BrowserTab(QWidget *parent = nullptr);
 
-    // DevToolsPanel connects to these
     NetworkCapture *networkCapture() const { return m_capture; }
 
+    // Run arbitrary JS in the current page
+    void runJS(const QString &script);
+
 signals:
-    // Legacy — kept for raw HTTP layer (Interceptor)
     void requestCaptured(const QString &method,
                          const QString &url,
                          const QString &headers);
@@ -40,7 +41,6 @@ private:
     QLabel         *m_statusLabel;
     Interceptor    *m_interceptor;
     NetworkCapture *m_capture;
-
     void setupUI();
     void setupWebEngine();
     void applySettings();

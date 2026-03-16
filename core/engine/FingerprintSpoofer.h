@@ -1,34 +1,27 @@
 #pragma once
+#include "IdentityStore.h"
 #include <QString>
-#include <QRandomGenerator>
-
-struct Fingerprint {
-    QString userAgent;
-    QString platform;
-    QString vendor;
-    int     hardwareConcurrency;
-    int     deviceMemory;
-    QString screenRes;
-    QString timezone;
-    QString languages;
-    QString sec_ch_ua;
-    QString chromeVersion;
-};
 
 class FingerprintSpoofer {
 public:
-    static FingerprintSpoofer& instance() {
+    static FingerprintSpoofer &instance() {
         static FingerprintSpoofer s;
         return s;
     }
 
-    const Fingerprint& get() const { return m_fp; }
+    const BrowserIdentity &identity() const { return m_id; }
 
-    // JS to inject into every page
+    // Full JS injection script — injected at DocumentCreation
+    // covers every fingerprint vector
     QString injectionScript() const;
 
+    // Force load a specific identity (for testing / headless mode)
+    void loadIdentity(const BrowserIdentity &id) { m_id = id; }
+
+    // Regenerate identity (user clicked reset)
+    void resetIdentity() { m_id = IdentityStore::regenerate(); }
+
 private:
-    FingerprintSpoofer();
-    Fingerprint m_fp;
-    Fingerprint generate();
+    FingerprintSpoofer() { m_id = IdentityStore::load(); }
+    BrowserIdentity m_id;
 };

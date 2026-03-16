@@ -91,28 +91,48 @@ void BrowserTab::setupWebEngine() {
     auto *profile = new QWebEngineProfile(this);
     profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
     profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
-    profile->setHttpUserAgent(spoofer.get().userAgent);
+    profile->setHttpUserAgent(spoofer.identity().userAgent);
 
-    // Fingerprint spoof script (DocumentCreation, runs first)
+    // Spoof script — now runs on subframes too
+    // Fixes: hidden iframe leaks that CreepJS uses to catch spoofing
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
-    spoofScript.setSourceCode(spoofer.injectionScript());
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    QString _s = spoofer.injectionScript(); qDebug() << "[NB C++] script length:" << _s.size(); spoofScript.setSourceCode(_s);
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
+    spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
-    // HTTP-level interceptor (headers, blocking junk)
+    QWebEngineScript capScript;
+    capScript.setName("nothing_capture");
+    capScript.setSourceCode(NetworkCapture::captureScript());
+    capScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    capScript.setWorldId(QWebEngineScript::MainWorld);
+    capScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(capScript);
+
     m_interceptor = new Interceptor(this);
     profile->setUrlRequestInterceptor(m_interceptor);
     connect(m_interceptor, &Interceptor::requestSeen,
-            this,           &BrowserTab::requestCaptured);  // legacy signal
+            this,           &BrowserTab::requestCaptured);
 
     auto *page = new QWebEnginePage(profile, this);
+
+    // Fixes hasKnownBgColor — QtWebEngine's default bg is detectable
+    page->setBackgroundColor(Qt::white);
+
     m_view->setPage(page);
 
-    // NetworkCapture — JS-level fetch/XHR/WS/cookie/storage interception
     m_capture = new NetworkCapture(this);
-    m_capture->attachToPage(page, profile);  // also injects its script + hooks cookie store
+    m_capture->attachToPage(page, profile);
+
+    connect(m_view, &QWebEngineView::loadFinished, this, [this](bool ok) {
+        if (!ok) return;
+        m_view->page()->runJavaScript(
+            "window.addEventListener('error', e => console.log('FP ERROR:', e.message, e.lineno));"
+        );
+        m_view->page()->runJavaScript(NetworkCapture::captureScript());
+    });
 
     connect(m_view, &QWebEngineView::urlChanged, this, &BrowserTab::onUrlChanged);
     applySettings();
@@ -167,4 +187,9 @@ void BrowserTab::toggleCSS(bool enabled) {
 void BrowserTab::toggleImages(bool enabled) {
     m_view->settings()->setAttribute(QWebEngineSettings::AutoLoadImages, enabled);
     m_view->reload();
+}
+
+void BrowserTab::runJS(const QString &script) {
+    if (m_view && m_view->page())
+        m_view->page()->runJavaScript(script);
 }

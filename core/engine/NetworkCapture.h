@@ -54,6 +54,8 @@ public:
 
     // JS to inject — intercepts fetch + XHR + WebSocket at page level
     static QString captureScript();
+    // JS to inject into WA's Web Worker
+    static QString workerCaptureScript();
 
 signals:
     void requestCaptured(const CapturedRequest &req);

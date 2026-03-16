@@ -3,6 +3,21 @@
 #include "app/MainWindow.h"
 
 int main(int argc, char *argv[]) {
+    // ── Chromium flags — set BEFORE QApplication ──────────────────────────────
+    // --disable-blink-features=AutomationControlled:
+    //   Makes navigator.webdriver return false at the engine level.
+    //   Because Chromium does it internally, toString() stays [native code].
+    //   Fixes: webDriverIsOn, hasToStringProxy (partially)
+    //
+    // --disable-features=UserAgentClientHint:
+    //   Prevents QtWebEngine from injecting its own UA client hint overrides
+    //   that conflict with our Interceptor headers.
+    qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
+        "--disable-blink-features=AutomationControlled "
+        "--no-sandbox "
+        "--allow-running-insecure-content"
+    );
+
     QApplication app(argc, argv);
     app.setApplicationName("Nothing Browser");
     app.setApplicationVersion("0.1.0");
@@ -21,6 +36,5 @@ int main(int argc, char *argv[]) {
 
     MainWindow window;
     window.show();
-
     return app.exec();
 }

@@ -6,6 +6,8 @@
 #include <QPixmap>
 #include <QPainter>
 #include <QIcon>
+#include <QCloseEvent>
+#include <QProcess>
 #include "../tabs/DevToolsPanel.h"
 #include "../tabs/NewsTab.h"
 #include "../engine/UpdateChecker.h"
@@ -18,6 +20,14 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override = default;
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
+private slots:
+    void saveSession();
+    void loadSession();
+    void quickSaveSession(const QString &name);
 
 private:
     QStackedWidget *m_stack;
@@ -32,7 +42,9 @@ private:
 
     UpdateChecker  *m_checker;
 
-    void setupTabs();
-    void setupStyle();
-    QIcon tabIcon(const QString &color);
+    void    setupTabs();
+    void    setupStyle();
+    void    setupSessionMenu();
+    QString sessionsDir() const;
+    QIcon   tabIcon(const QString &color);
 };
