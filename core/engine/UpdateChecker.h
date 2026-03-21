@@ -30,7 +30,7 @@ struct VersionInfo {
 class UpdateChecker : public QObject {
     Q_OBJECT
 public:
-    static constexpr const char *CURRENT_VERSION = "0.1.0";
+    static constexpr const char *CURRENT_VERSION = "0.1.2";
     static constexpr const char *GITHUB_API_URL  =
         "https://api.github.com/repos/BunElysiaReact/nothing-browser/releases/latest";
 
