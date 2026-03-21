@@ -282,88 +282,85 @@ void UpdateChecker::cancelDownload() {
 //  6. Cleans up
 // ═════════════════════════════════════════════════════════════════════════════
 void UpdateChecker::installUpdate(const QString &archivePath) {
-    QString appPath   = QCoreApplication::applicationFilePath();
-    QString appDir    = QFileInfo(appPath).absolutePath();
-    QString appName   = QFileInfo(appPath).fileName();
+    QString appPath    = QCoreApplication::applicationFilePath();
+    QString appDir     = QFileInfo(appPath).absolutePath();
+    QString appName    = QFileInfo(appPath).fileName();
     QString scriptPath = downloadDir() + "/updater.sh";
     QString extractDir = downloadDir() + "/extracted";
 
-    // Detect archive type
-    bool isZip    = archivePath.endsWith(".zip");
-    bool isTarGz  = archivePath.endsWith(".tar.gz") || archivePath.endsWith(".tgz");
-    bool isAppImg = archivePath.endsWith(".AppImage") || archivePath.endsWith(".appimage");
+    // Does the binary live somewhere we need elevated perms to write?
+    bool needsSudo = !QFileInfo(appPath).isWritable();
 
+    // Extract command
     QString extractCmd;
-    if (isTarGz)
+    if (archivePath.endsWith(".tar.gz") || archivePath.endsWith(".tgz"))
         extractCmd = QString("tar -xzf \"%1\" -C \"%2\"").arg(archivePath, extractDir);
-    else if (isZip)
+    else if (archivePath.endsWith(".zip"))
         extractCmd = QString("unzip -o \"%1\" -d \"%2\"").arg(archivePath, extractDir);
-    else if (isAppImg) {
-        // AppImage — just replace directly
-        extractCmd = QString("cp \"%1\" \"%2\"").arg(archivePath, extractDir + "/" + appName);
-    } else {
+    else if (archivePath.endsWith(".AppImage") || archivePath.endsWith(".appimage"))
+        extractCmd = QString("cp \"%1\" \"%2/%3\"").arg(archivePath, extractDir, appName);
+    else
         extractCmd = QString("tar -xf \"%1\" -C \"%2\"").arg(archivePath, extractDir);
-    }
 
-    // Script content
-    QString script = QString(
-        "#!/bin/bash\n"
-        "# Nothing Browser auto-updater — generated %1\n"
-        "set -e\n\n"
-        "APP_PATH=\"%2\"\n"
-        "APP_DIR=\"%3\"\n"
-        "APP_NAME=\"%4\"\n"
-        "ARCHIVE=\"%5\"\n"
-        "EXTRACT_DIR=\"%6\"\n\n"
-        "# Wait for the app to fully exit\n"
-        "sleep 1\n\n"
-        "# Extract\n"
-        "mkdir -p \"$EXTRACT_DIR\"\n"
-        "%7\n\n"
-        "# Find the binary — search recursively for a file named like the app\n"
-        "NEW_BIN=$(find \"$EXTRACT_DIR\" -type f -name \"$APP_NAME\" | head -1)\n\n"
-        "# Fallback: find any executable that isn't a .so or .sh\n"
-        "if [ -z \"$NEW_BIN\" ]; then\n"
-        "    NEW_BIN=$(find \"$EXTRACT_DIR\" -type f -executable "
-        "! -name '*.so*' ! -name '*.sh' | head -1)\n"
-        "fi\n\n"
-        "if [ -z \"$NEW_BIN\" ]; then\n"
-        "    echo 'ERROR: Could not find binary in archive'\n"
-        "    exit 1\n"
-        "fi\n\n"
-        "# Backup current binary\n"
-        "cp \"$APP_PATH\" \"$APP_PATH.bak\" 2>/dev/null || true\n\n"
-        "# Replace binary\n"
-        "cp \"$NEW_BIN\" \"$APP_PATH\"\n"
-        "chmod +x \"$APP_PATH\"\n\n"
-        "# Copy any new shared resources if present\n"
-        "NEW_DIR=$(dirname \"$NEW_BIN\")\n"
-        "if [ \"$NEW_DIR\" != \"$EXTRACT_DIR\" ]; then\n"
-        "    rsync -a --exclude='nothing-browser' \"$NEW_DIR/\" \"$APP_DIR/\" 2>/dev/null || true\n"
-        "fi\n\n"
-        "# Clean up\n"
-        "rm -rf \"$EXTRACT_DIR\"\n"
-        "rm -f \"$ARCHIVE\"\n\n"
-        "# Restart app\n"
-        "\"$APP_PATH\" &\n\n"
-        "# Remove this script\n"
-        "rm -f \"$0\"\n"
-    )
-    .arg(QDateTime::currentDateTime().toString(Qt::ISODate))
-    .arg(appPath)
-    .arg(appDir)
-    .arg(appName)
-    .arg(archivePath)
-    .arg(extractDir)
-    .arg(extractCmd);
-
-    // Write script
+    // Build the updater script
+    // Uses pkexec for a GUI password prompt when the binary needs root
     QFile scriptFile(scriptPath);
     if (!scriptFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
         emit downloadFailed("Cannot write updater script to: " + scriptPath);
         return;
     }
-    QTextStream(&scriptFile) << script;
+
+    QTextStream s(&scriptFile);
+    s << "#!/bin/bash\n";
+    s << "# Nothing Browser auto-updater\n";
+    s << "ORIGINAL_USER=\"" << qgetenv("USER") << "\"\n";
+    s << "APP_PATH=\""    << appPath    << "\"\n";
+    s << "APP_DIR=\""     << appDir     << "\"\n";
+    s << "APP_NAME=\""    << appName    << "\"\n";
+    s << "ARCHIVE=\""     << archivePath << "\"\n";
+    s << "EXTRACT_DIR=\"" << extractDir << "\"\n\n";
+
+    s << "sleep 1\n\n";
+
+    s << "mkdir -p \"$EXTRACT_DIR\"\n";
+    s << extractCmd << "\n\n";
+
+    s << "NEW_BIN=$(find \"$EXTRACT_DIR\" -type f -name \"$APP_NAME\" | head -1)\n";
+    s << "if [ -z \"$NEW_BIN\" ]; then\n";
+    s << "    NEW_BIN=$(find \"$EXTRACT_DIR\" -maxdepth 4 -type f -executable \\\n";
+    s << "              ! -name '*.so*' ! -name '*.jar' ! -name '*.sh' | head -1)\n";
+    s << "fi\n";
+    s << "if [ -z \"$NEW_BIN\" ]; then\n";
+    s << "    echo 'ERROR: binary not found in archive'\n";
+    s << "    exit 1\n";
+    s << "fi\n\n";
+
+    // Copy with or without sudo
+    if (needsSudo) {
+        s << "# Need elevated permissions — try pkexec, fall back to sudo\n";
+        s << "cp \"$APP_PATH\" \"$APP_PATH.bak\" 2>/dev/null || true\n";
+        s << "pkexec cp \"$NEW_BIN\" \"$APP_PATH\" 2>/dev/null \\\n";
+        s << "    || sudo cp \"$NEW_BIN\" \"$APP_PATH\"\n";
+        s << "pkexec chmod +x \"$APP_PATH\" 2>/dev/null \\\n";
+        s << "    || sudo chmod +x \"$APP_PATH\"\n\n";
+    } else {
+        s << "cp \"$APP_PATH\" \"$APP_PATH.bak\" 2>/dev/null || true\n";
+        s << "cp \"$NEW_BIN\" \"$APP_PATH\"\n";
+        s << "chmod +x \"$APP_PATH\"\n\n";
+    }
+
+    s << "# Clean up\n";
+    s << "rm -rf \"$EXTRACT_DIR\"\n";
+    s << "rm -f \"$ARCHIVE\"\n\n";
+
+    s << "# Restart as the original user\n";
+    s << "if [ \"$(id -u)\" = \"0\" ] && [ -n \"$ORIGINAL_USER\" ]; then\n";
+    s << "    su - \"$ORIGINAL_USER\" -c \"\\\"$APP_PATH\\\" &\"\n";
+    s << "else\n";
+    s << "    \"$APP_PATH\" &\n";
+    s << "fi\n\n";
+
+    s << "rm -f \"$0\"\n";
     scriptFile.close();
 
     // Make executable
@@ -373,12 +370,11 @@ void UpdateChecker::installUpdate(const QString &archivePath) {
 
     emit installStarted();
 
-    // Launch script detached — it runs after we exit
+    // Launch detached — app exits so script can replace the binary
     QProcess::startDetached("/bin/bash", {scriptPath});
-
-    // Exit app so script can replace the binary
     QCoreApplication::quit();
 }
+
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Helpers
