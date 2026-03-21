@@ -234,11 +234,12 @@ void UpdateChecker::onDownloadFinished() {
     m_dlReply->deleteLater();
 
     if (m_dlReply->error() != QNetworkReply::NoError) {
+        QString errStr = m_dlReply->errorString();
         m_dlFile->close();
         QFile::remove(m_dlFile->fileName());
         delete m_dlFile; m_dlFile = nullptr;
         m_dlReply = nullptr;
-        emit downloadFailed(m_dlReply->errorString());
+        emit downloadFailed(errStr);
         return;
     }
 
