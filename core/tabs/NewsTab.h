@@ -1,16 +1,15 @@
 #pragma once
 #include <QWidget>
-#include <QLabel>
 #include <QPushButton>
-#include <QTextEdit>
+#include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QFrame>
 #include <QScrollArea>
-#include "../engine/UpdateChecker.h"
+#include <QFrame>
+#include "UpdateChecker.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NotificationBell  —  lives in the top bar, lights up on update
+//  Notification bell with unread badge
 // ─────────────────────────────────────────────────────────────────────────────
 class NotificationBell : public QPushButton {
     Q_OBJECT
@@ -18,55 +17,70 @@ public:
     explicit NotificationBell(QWidget *parent = nullptr);
     void setUnread(int count);
     void clearUnread();
+    int  unread() const { return m_unread; }
 private:
-    int     m_unread = 0;
-    QLabel *m_badge;
     void    refreshStyle();
+    QLabel *m_badge  = nullptr;
+    int     m_unread = 0;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NewsTab  —  home hub: quick scrapper panel + updates + changelog
+//  NewsTab
 // ─────────────────────────────────────────────────────────────────────────────
 class NewsTab : public QWidget {
     Q_OBJECT
 public:
     explicit NewsTab(QWidget *parent = nullptr);
 
-    // MainWindow calls this to hand off the shared UpdateChecker
     void attachChecker(UpdateChecker *checker);
-
-    // Returns the bell widget so MainWindow can embed it in the tab bar area
     NotificationBell *bell() const { return m_bell; }
+    void renderChangelog(const QList<ChangeEntry> &entries);
 
 signals:
-    // Emitted when user clicks "Open Scrapper" quick-access
-    void openScrapper();
     void openBrowser();
+    void openScrapper();
 
 private slots:
     void onUpdateAvailable(const VersionInfo &info);
     void onNoUpdate(const VersionInfo &info);
-    void onCheckFailed(const QString &err);
+    void onCheckFailed(const QString &error);
     void onManualCheck();
+    void onDownloadReady(const QString &path, const VersionInfo &info);
+    void onDownloadFailed(const QString &error);
 
 private:
-    UpdateChecker    *m_checker = nullptr;
-    NotificationBell *m_bell;
-
-    // UI sections
-    QLabel    *m_versionLabel;
-    QLabel    *m_updateStatus;
-    QPushButton *m_checkBtn;
-    QPushButton *m_downloadBtn;
-    QWidget   *m_changelogWidget;
-    QVBoxLayout *m_changelogLayout;
-
     void buildUI();
-    void renderChangelog(const QList<ChangeEntry> &entries);
+    void setDownloadProgress(int pct);
     void setUpdateBanner(bool hasUpdate, const QString &version, const QString &url);
 
-    static QString s();   // shared stylesheet
+    // ── Top bar ───────────────────────────────────────────────────────────────
+    QLabel           *m_versionLabel  = nullptr;
+    NotificationBell *m_bell          = nullptr;
+
+    // ── Update card ───────────────────────────────────────────────────────────
+    QLabel      *m_updateStatus   = nullptr;
+    QPushButton *m_checkBtn       = nullptr;
+    QPushButton *m_downloadBtn    = nullptr;
+    QPushButton *m_installBtn     = nullptr;
+    QPushButton *m_cancelBtn      = nullptr;
+
+    // Progress bar
+    QWidget *m_progressWrap  = nullptr;
+    QWidget *m_progressFill  = nullptr;
+    QLabel  *m_progressLabel = nullptr;
+
+    // ── Changelog card ────────────────────────────────────────────────────────
+    QWidget     *m_changelogWidget = nullptr;
+    QVBoxLayout *m_changelogLayout = nullptr;
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    UpdateChecker *m_checker        = nullptr;
+    VersionInfo    m_pendingInfo;
+    QString        m_downloadedPath;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    static QString    s();
     static QPushButton *actionBtn(const QString &label, const QString &color,
                                    QWidget *parent);
-    static QFrame *separator(QWidget *parent);
+    static QFrame     *separator(QWidget *parent);
 };

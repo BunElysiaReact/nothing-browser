@@ -10,12 +10,13 @@ struct CapturedRequest {
     QString id;
     QString method;
     QString url;
-    QString type;       // XHR, Fetch, WS, Doc, Script, Img, etc.
+    QString type;            // XHR, Fetch, WS, Doc, Script, Img, etc.
     QString status;
     QString mimeType;
     QString requestHeaders;
+    QString requestBody;     // ← body sent WITH the request (POST/PUT/PATCH)
     QString responseHeaders;
-    QString responseBody;   // from JS interception (XHR/fetch)
+    QString responseBody;    // ← body received back from server
     QString timestamp;
     qint64  size = 0;
     bool    isWebSocket = false;
@@ -49,12 +50,9 @@ class NetworkCapture : public QObject {
 public:
     explicit NetworkCapture(QObject *parent = nullptr);
 
-    // Call once after BrowserTab sets up its QWebEnginePage
     void attachToPage(QWebEnginePage *page, QWebEngineProfile *profile);
 
-    // JS to inject — intercepts fetch + XHR + WebSocket at page level
     static QString captureScript();
-    // JS to inject into WA's Web Worker
     static QString workerCaptureScript();
 
 signals:

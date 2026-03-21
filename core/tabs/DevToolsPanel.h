@@ -99,7 +99,10 @@ private:
 
     // Data
     struct NetEntry {
-        QString method, url, status, type, mime, body, reqHeaders, resHeaders;
+        QString method, url, status, type, mime;
+        QString body;          // request body (sent with request)
+        QString reqHeaders, resHeaders;
+        QString responseBody;  // response body (received from server)
     };
     struct CookieEntry {
         CapturedCookie cookie;
@@ -118,9 +121,19 @@ private:
     QString buildHeadersBlock(const NetEntry &e) const;
     QString buildSummaryBlock(const NetEntry &e) const;
     QString buildRaw(const NetEntry &e) const;
-    QString generatePython(const QString &method, const QString &url, const QString &headers);
-    QString generateCurl(const QString &method, const QString &url, const QString &headers);
-    QString generateJS(const QString &method, const QString &url);
+
+    // cookieStr is optional — pass pre-built "name=val; name2=val2" string
+    QString generatePython(const QString &method, const QString &url,
+                           const QString &headers, const QString &body = {},
+                           const QString &cookies = {});
+    QString generateCurl(const QString &method, const QString &url,
+                         const QString &headers, const QString &body = {},
+                         const QString &cookies = {});
+    QString generateJS(const QString &method, const QString &url,
+                       const QString &headers, const QString &body = {});
+
+    // Build cookie string for a given request URL from captured cookies
+    QString cookiesForUrl(const QString &url) const;
 
     static void clip(const QString &text);
     static QPushButton *btn(const QString &label, const QString &color, QWidget *parent);

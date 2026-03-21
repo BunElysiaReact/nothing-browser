@@ -58,9 +58,10 @@ void NetworkCapture::onJsMessage(const QString &json) {
             req.type            = obj["reqType"].toString();
             req.status          = obj["status"].toString();
             req.mimeType        = obj["mime"].toString();
-            req.responseBody    = obj["body"].toString();
             req.requestHeaders  = obj["reqHeaders"].toString();
+            req.requestBody     = obj["reqBody"].toString();   // ← fixed
             req.responseHeaders = obj["resHeaders"].toString();
+            req.responseBody    = obj["body"].toString();
             req.size            = obj["size"].toInt();
             req.timestamp       = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
             emit requestCaptured(req);
@@ -141,34 +142,65 @@ function bufToB64(buf) {
     return btoa(bin);
 }
 
-// fetch
+// Normalize request body to a string regardless of what was passed
+function extractBody(body) {
+    if (!body) return '';
+    if (typeof body === 'string') return body.slice(0, 8000);
+    if (body instanceof URLSearchParams) return body.toString().slice(0, 8000);
+    if (body instanceof FormData) {
+        var out = '';
+        try { body.forEach(function(v,k){ out += k+'='+v+'&'; }); } catch(e) {}
+        return out.slice(0, 8000);
+    }
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+        try { return bufToB64(body); } catch(e) { return '[binary body]'; }
+    }
+    try { return String(body).slice(0, 8000); } catch(e) { return ''; }
+}
+
+// ── fetch ─────────────────────────────────────────────────────────────────────
 var _fetch = window.fetch;
 window.fetch = function(input, init) {
-    var id = uid();
-    var url = typeof input === 'string' ? input : (input.url || String(input));
-    var method = (init && init.method) ? init.method.toUpperCase() : 'GET';
+    var id      = uid();
+    var url     = typeof input === 'string' ? input : (input.url || String(input));
+    var method  = (init && init.method) ? init.method.toUpperCase() : 'GET';
+    var reqBody = (init && init.body) ? extractBody(init.body) : '';
     var reqHdrs = '';
-    try { reqHdrs = JSON.stringify((init && init.headers) ? init.headers : {}); } catch(e) {}
-    push({ type:'request', id:id, method:method, url:url, reqType:'Fetch', reqHeaders:reqHdrs });
+    try {
+        var h = (init && init.headers) ? init.headers : {};
+        if (h instanceof Headers) {
+            var tmp = {};
+            h.forEach(function(v,k){ tmp[k]=v; });
+            h = tmp;
+        }
+        reqHdrs = JSON.stringify(h);
+    } catch(e) {}
+
+    push({ type:'request', id:id, method:method, url:url,
+           reqType:'Fetch', reqHeaders:reqHdrs, reqBody:reqBody });
+
     return _fetch.apply(this, arguments).then(function(resp) {
         var status = resp.status;
-        var mime = resp.headers.get('content-type') || '';
+        var mime   = resp.headers.get('content-type') || '';
         resp.clone().text().then(function(body) {
             push({ type:'response', id:id, method:method, url:url, reqType:'Fetch',
                    status:String(status), mime:mime, body:body.slice(0,8000),
-                   size:body.length, reqHeaders:reqHdrs, resHeaders:'' });
+                   size:body.length, reqHeaders:reqHdrs, reqBody:reqBody, resHeaders:'' });
         }).catch(function(){});
         return resp;
     });
 };
 
-// XHR
-var _open = XMLHttpRequest.prototype.open;
-var _send = XMLHttpRequest.prototype.send;
+// ── XHR ───────────────────────────────────────────────────────────────────────
+var _open   = XMLHttpRequest.prototype.open;
+var _send   = XMLHttpRequest.prototype.send;
 var _setHdr = XMLHttpRequest.prototype.setRequestHeader;
+
 XMLHttpRequest.prototype.open = function(method, url) {
-    this.__n_id__ = uid(); this.__n_method__ = method.toUpperCase();
-    this.__n_url__ = url; this.__n_hdrs__ = {};
+    this.__n_id__     = uid();
+    this.__n_method__ = method.toUpperCase();
+    this.__n_url__    = url;
+    this.__n_hdrs__   = {};
     return _open.apply(this, arguments);
 };
 XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
@@ -176,52 +208,72 @@ XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
     return _setHdr.apply(this, arguments);
 };
 XMLHttpRequest.prototype.send = function(body) {
-    var self = this;
-    var id = self.__n_id__, method = self.__n_method__||'GET', url = self.__n_url__||'';
+    var self    = this;
+    var id      = self.__n_id__;
+    var method  = self.__n_method__ || 'GET';
+    var url     = self.__n_url__    || '';
+    var reqBody = extractBody(body);
     var reqHdrs = '';
-    try { reqHdrs = JSON.stringify(self.__n_hdrs__||{}); } catch(e) {}
-    push({ type:'request', id:id, method:method, url:url, reqType:'XHR', reqHeaders:reqHdrs });
+    try { reqHdrs = JSON.stringify(self.__n_hdrs__ || {}); } catch(e) {}
+
+    push({ type:'request', id:id, method:method, url:url,
+           reqType:'XHR', reqHeaders:reqHdrs, reqBody:reqBody });
+
     self.addEventListener('load', function() {
-        var text = ''; try { text = self.responseText||''; } catch(e) {}
+        var text = ''; try { text = self.responseText || ''; } catch(e) {}
         push({ type:'response', id:id, method:method, url:url, reqType:'XHR',
-               status:String(self.status), mime:self.getResponseHeader('content-type')||'',
-               body:text.slice(0,8000), size:text.length, reqHeaders:reqHdrs, resHeaders:'' });
+               status:String(self.status),
+               mime:self.getResponseHeader('content-type') || '',
+               body:text.slice(0,8000), size:text.length,
+               reqHeaders:reqHdrs, reqBody:reqBody, resHeaders:'' });
     });
     return _send.apply(this, arguments);
 };
 
-// WebSocket — full binary capture
+// ── WebSocket — full binary capture ───────────────────────────────────────────
 var _WS = window.WebSocket;
 window.WebSocket = function(url, protocols) {
     var id = uid();
     var ws = protocols ? new _WS(url, protocols) : new _WS(url);
     ws.binaryType = 'arraybuffer';
     push({ type:'ws_open', id:id, url:url });
+
     var _wsSend = ws.send.bind(ws);
     ws.send = function(data) {
         if (data instanceof ArrayBuffer)
             push({ type:'ws_send', id:id, url:url, data:bufToB64(data), binary:true });
         else if (data instanceof Blob) {
             var fr = new FileReader();
-            fr.onload = function() { push({ type:'ws_send', id:id, url:url, data:bufToB64(fr.result), binary:true }); };
+            fr.onload = function() {
+                push({ type:'ws_send', id:id, url:url, data:bufToB64(fr.result), binary:true });
+            };
             fr.readAsArrayBuffer(data);
-        } else
-            push({ type:'ws_send', id:id, url:url, data:String(data).slice(0,8000), binary:false });
+        } else {
+            push({ type:'ws_send', id:id, url:url,
+                   data:String(data).slice(0,8000), binary:false });
+        }
         return _wsSend(data);
     };
+
     ws.addEventListener('message', function(e) {
         if (e.data instanceof ArrayBuffer)
             push({ type:'ws_recv', id:id, url:url, data:bufToB64(e.data), binary:true });
         else if (e.data instanceof Blob) {
             var fr = new FileReader();
-            fr.onload = function() { push({ type:'ws_recv', id:id, url:url, data:bufToB64(fr.result), binary:true }); };
+            fr.onload = function() {
+                push({ type:'ws_recv', id:id, url:url, data:bufToB64(fr.result), binary:true });
+            };
             fr.readAsArrayBuffer(e.data);
-        } else
-            push({ type:'ws_recv', id:id, url:url, data:String(e.data).slice(0,8000), binary:false });
+        } else {
+            push({ type:'ws_recv', id:id, url:url,
+                   data:String(e.data).slice(0,8000), binary:false });
+        }
     });
+
     ws.addEventListener('close', function(e) {
         push({ type:'ws_close', id:id, url:url, code:e.code, reason:e.reason });
     });
+
     return ws;
 };
 window.WebSocket.prototype  = _WS.prototype;
@@ -230,12 +282,13 @@ window.WebSocket.OPEN       = _WS.OPEN;
 window.WebSocket.CLOSING    = _WS.CLOSING;
 window.WebSocket.CLOSED     = _WS.CLOSED;
 
-// localStorage / sessionStorage
+// ── localStorage / sessionStorage ─────────────────────────────────────────────
 function wrapStorage(store, label) {
     var _si = store.setItem.bind(store);
     store.setItem = function(key, value) {
         push({ type:'storage', storageType:label,
-               origin:window.location.origin, key:key, value:String(value).slice(0,2000) });
+               origin:window.location.origin,
+               key:key, value:String(value).slice(0,2000) });
         return _si(key, value);
     };
 }

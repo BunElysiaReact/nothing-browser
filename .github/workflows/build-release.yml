@@ -11,7 +11,7 @@ on:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
-  #  LINUX — use apt directly, no aqt nonsense
+  #  LINUX
   # ═══════════════════════════════════════════════════════════════════════════
   build-linux:
     name: Build Linux
@@ -19,6 +19,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Install Qt6 + deps via apt
         run: |
@@ -39,16 +45,25 @@ jobs:
             build-essential \
             dpkg-dev
 
+      - name: Build NewPipe Bridge JAR
+        run: |
+          cd newpipe-bridge
+          chmod +x gradlew
+          ./gradlew shadowJar --no-daemon -q
+          cd ..
+
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
 
       - name: Build
         run: cmake --build build --parallel
 
+      - name: Copy JAR to build
+        run: cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar build/newpipe-bridge.jar
+
       - name: Package .deb
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # if triggered manually (not a tag), use a valid placeholder
           [[ "$VERSION" == "main" || "$VERSION" == "master" || -z "$VERSION" ]] && VERSION="0.0.0"
           PKG="dist/nothing-browser_${VERSION}_amd64"
           mkdir -p ${PKG}/DEBIAN \
@@ -56,17 +71,24 @@ jobs:
                    ${PKG}/usr/share/applications \
                    ${PKG}/usr/share/nothing-browser
 
-          cp build/nothing-browser ${PKG}/usr/local/bin/
-          cp assets/icons/logo.svg ${PKG}/usr/share/nothing-browser/
+          cp build/nothing-browser         ${PKG}/usr/local/bin/
+          cp build/newpipe-bridge.jar      ${PKG}/usr/local/bin/
+          cp assets/icons/logo.svg         ${PKG}/usr/share/nothing-browser/
 
           cat > ${PKG}/DEBIAN/control <<EOF
           Package: nothing-browser
           Version: ${VERSION}
           Architecture: amd64
           Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
-          Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6
+          Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6, openjdk-17-jre
           Description: Nothing Browser — Does nothing, except everything that matters.
           EOF
+
+          cat > ${PKG}/DEBIAN/postinst <<'EOF'
+          #!/bin/sh
+          update-desktop-database /usr/share/applications || true
+          EOF
+          chmod 755 ${PKG}/DEBIAN/postinst
 
           cat > ${PKG}/usr/share/applications/nothing-browser.desktop <<EOF
           [Desktop Entry]
@@ -84,9 +106,11 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           [[ "$VERSION" == "main" || "$VERSION" == "master" || -z "$VERSION" ]] && VERSION="0.0.0"
-          mkdir -p dist
+          mkdir -p dist/nothing-browser-${VERSION}-linux-x86_64
+          cp build/nothing-browser              dist/nothing-browser-${VERSION}-linux-x86_64/
+          cp build/newpipe-bridge.jar           dist/nothing-browser-${VERSION}-linux-x86_64/
           tar -czf dist/nothing-browser-${VERSION}-linux-x86_64.tar.gz \
-            -C build nothing-browser
+            -C dist nothing-browser-${VERSION}-linux-x86_64
 
       - uses: actions/upload-artifact@v4
         with:
@@ -96,7 +120,7 @@ jobs:
             dist/*.tar.gz
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  WINDOWS — find Qt paths explicitly, no env var guessing
+  #  WINDOWS
   # ═══════════════════════════════════════════════════════════════════════════
   build-windows:
     name: Build Windows
@@ -104,6 +128,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
@@ -116,16 +146,21 @@ jobs:
           cache: true
           dir: "C:/Qt"
 
+      - name: Build NewPipe Bridge JAR
+        shell: cmd
+        run: |
+          cd newpipe-bridge
+          gradlew.bat shadowJar --no-daemon -q
+          cd ..
+
       - name: Find Qt and configure
         shell: powershell
         run: |
-          # Find cmake config dir — search under C:\Qt
           $cmakeDir = Get-ChildItem "C:\Qt" -Recurse -Filter "Qt6Config.cmake" |
                       Select-Object -First 1 -ExpandProperty DirectoryName
           Write-Host "Qt cmake dir: $cmakeDir"
           echo "QT_CMAKE_DIR=$cmakeDir" >> $env:GITHUB_ENV
 
-          # Qt root is 3 levels up from lib\cmake\Qt6
           $qtRoot = Split-Path (Split-Path (Split-Path $cmakeDir))
           Write-Host "Qt root: $qtRoot"
           echo "QT_ROOT=$qtRoot" >> $env:GITHUB_ENV
@@ -150,34 +185,35 @@ jobs:
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
-          if ([string]::IsNullOrEmpty($version)) { $version = "dev" }
+          if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
 
-          New-Item -ItemType Directory -Force "dist\nothing-browser-win64"
-          Copy-Item "build-win\Release\nothing-browser.exe" "dist\nothing-browser-win64\"
+          $outDir = "dist\nothing-browser-win64"
+          New-Item -ItemType Directory -Force $outDir
+
+          Copy-Item "build-win\Release\nothing-browser.exe" "$outDir\"
+          Copy-Item "newpipe-bridge\build\libs\newpipe-bridge-1.0.0.jar" "$outDir\newpipe-bridge.jar"
+
+          $javaHome = "$env:JAVA_HOME"
+          Write-Host "Bundling JRE from: $javaHome"
+          Copy-Item -Recurse "$javaHome" "$outDir\jre"
 
           $wdqt = "$env:QT_BIN\windeployqt.exe"
-          Write-Host "windeployqt: $wdqt"
-
           if (-not (Test-Path $wdqt)) {
-            # fallback search
             $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                     Select-Object -First 1 -ExpandProperty FullName
-            Write-Host "Found via search: $wdqt"
           }
+          Write-Host "windeployqt: $wdqt"
+          & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser.exe"
 
-          & $wdqt --release --no-compiler-runtime "dist\nothing-browser-win64\nothing-browser.exe"
-
-          # Copy WebEngine runtime
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) {
-              Write-Host "Copying $_"
-              Copy-Item -Recurse -Force $src "dist\nothing-browser-win64\"
+              Copy-Item -Recurse -Force $src "$outDir\"
             }
           }
 
           Compress-Archive `
-            -Path "dist\nothing-browser-win64\*" `
+            -Path "$outDir\*" `
             -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
 
       - uses: actions/upload-artifact@v4
@@ -186,7 +222,7 @@ jobs:
           path: dist\*.zip
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  MACOS — already working, just clean up path resolution
+  #  MACOS
   # ═══════════════════════════════════════════════════════════════════════════
   build-macos:
     name: Build macOS
@@ -194,6 +230,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
 
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
@@ -213,6 +255,13 @@ jobs:
           echo "QT_BIN=$QT_ROOT/bin" >> $GITHUB_ENV
           echo "Qt root: $QT_ROOT"
 
+      - name: Build NewPipe Bridge JAR
+        run: |
+          cd newpipe-bridge
+          chmod +x gradlew
+          ./gradlew shadowJar --no-daemon -q
+          cd ..
+
       - name: Configure
         run: |
           mkdir -p build-mac
@@ -230,7 +279,6 @@ jobs:
           [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist
 
-          # Find or create .app
           if [ -d "build-mac/nothing-browser.app" ]; then
             APP="build-mac/nothing-browser.app"
           else
@@ -250,6 +298,10 @@ jobs:
           </dict></plist>
           EOF
           fi
+
+          cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
+            "${APP}/Contents/MacOS/newpipe-bridge.jar"
+          cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
 
           "$QT_BIN/macdeployqt" "$APP" -dmg -always-overwrite
           mv build-mac/nothing-browser.dmg \
@@ -273,22 +325,25 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
-      - name: Read changelog
+      - name: Build changelog from commits
         id: changelog
         run: |
-          NOTES=$(python3 -c "
-          import json
-          data = json.load(open('version.json'))
-          icons = {'added':'[+]','fix':'[F]','coming':'[→]'}
-          print('\n'.join(icons.get(e['type'],'[*]')+' '+e['text'] for e in data.get('changelog',[])))
-          ")
+          # Get commits since last tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            COMMITS=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s" --no-merges | head -30)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" --no-merges | head -30)
+          fi
           echo "NOTES<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "$COMMITS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - uses: softprops/action-gh-release@v2
@@ -298,20 +353,33 @@ jobs:
             ## Nothing Browser ${{ github.ref_name }}
             > Does nothing... except everything that matters.
 
-            ### Changes
+            ### What's changed
             ${{ steps.changelog.outputs.NOTES }}
 
             ---
-            **Linux:**
+
+            ### Install
+
+            **Linux (deb)**
             ```bash
-            curl -fsSL https://raw.githubusercontent.com/BunElysiaReact/nothing-browser/main/install.sh | sudo bash
+            sudo dpkg -i nothing-browser_*_amd64.deb
             ```
-            **Windows:** Download `.zip` → extract → run `nothing-browser.exe`
-            **macOS:** Download `.dmg` → drag to Applications
+
+            **Linux (tar.gz)**
+            ```bash
+            tar -xzf nothing-browser-*-linux-x86_64.tar.gz
+            cd nothing-browser-*-linux-x86_64
+            ./nothing-browser
+            ```
+
+            **Windows:** Download `.zip` → extract → run `nothing-browser.exe` (JRE bundled)
+
+            **macOS:** Download `.dmg` → drag to Applications (JRE bundled)
+
           files: |
             release-artifacts/linux-build/*.deb
             release-artifacts/linux-build/*.tar.gz
             release-artifacts/windows-build/*.zip
             release-artifacts/macos-build/*.dmg
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

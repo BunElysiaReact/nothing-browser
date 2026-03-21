@@ -81,3 +81,19 @@ logs/
 secrets/
 *.key
 *.pem
+# Build
+build/
+*.o
+*.a
+
+# Python scripts (reverse engineering stuff)
+*.py
+
+# Qt
+*.user
+CMakeCache.txt
+CMakeFiles/
+
+# Misc
+*.bak
+.DS_Store

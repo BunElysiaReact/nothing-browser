@@ -1,0 +1,39 @@
+plugins {
+    id 'java'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'dev.nothingbrowser'
+version = '1.0.0'
+
+repositories {
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    // NewPipe Extractor
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.0'
+
+    // NewPipe needs these
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'org.mozilla:rhino:1.7.15'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+jar {
+    manifest {
+        attributes 'Main-Class': 'dev.nothingbrowser.bridge.Main'
+    }
+}
+
+shadowJar {
+    archiveBaseName.set('newpipe-bridge')
+    archiveClassifier.set('')
+    archiveVersion.set('1.0.0')
+    mergeServiceFiles()
+}

@@ -2,6 +2,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QDateTime>
+#include <QMessageBox>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Shared style
@@ -30,6 +31,7 @@ QPushButton *NewsTab::actionBtn(const QString &label, const QString &color,
         }
         QPushButton:hover  { background:%2; }
         QPushButton:pressed{ background:%3; }
+        QPushButton:disabled { color:#333; border-color:#222; }
     )").arg(color)
        .arg(color=="#00cc66"?"#001800":color=="#0088ff"?"#001020":
             color=="#ff4444"?"#1a0000":color=="#ffaa00"?"#1a1000":"#161616")
@@ -77,14 +79,11 @@ void NotificationBell::refreshStyle() {
     bool active = m_unread > 0;
     setStyleSheet(QString(R"(
         QPushButton {
-            background:transparent;
-            border:none;
-            font-size:16px;
-            color:%1;
+            background:transparent; border:none;
+            font-size:16px; color:%1;
         }
         QPushButton:hover { background:#1a1a1a; border-radius:4px; }
     )").arg(active ? "#ffaa00" : "#444444"));
-
     m_badge->setStyleSheet(R"(
         QLabel {
             background:#ff4444; color:white;
@@ -99,15 +98,36 @@ void NotificationBell::refreshStyle() {
 // ═════════════════════════════════════════════════════════════════════════════
 NewsTab::NewsTab(QWidget *parent) : QWidget(parent) {
     setStyleSheet(s());
-    m_bell = new NotificationBell(this);  // parent owns it; MainWindow can reparent
+    m_bell = new NotificationBell(this);
     buildUI();
 }
 
 void NewsTab::attachChecker(UpdateChecker *checker) {
     m_checker = checker;
+
+    // Version check signals
     connect(checker, &UpdateChecker::updateAvailable, this, &NewsTab::onUpdateAvailable);
     connect(checker, &UpdateChecker::noUpdate,        this, &NewsTab::onNoUpdate);
     connect(checker, &UpdateChecker::checkFailed,     this, &NewsTab::onCheckFailed);
+
+    // Download signals
+    connect(checker, &UpdateChecker::downloadProgress, this, [this](int pct) {
+        setDownloadProgress(pct);
+    });
+    connect(checker, &UpdateChecker::downloadReady, this, [this](const QString &path, const VersionInfo &info) {
+        onDownloadReady(path, info);
+    });
+    connect(checker, &UpdateChecker::downloadFailed, this, [this](const QString &err) {
+        onDownloadFailed(err);
+    });
+    connect(checker, &UpdateChecker::installStarted, this, [this]() {
+        m_updateStatus->setStyleSheet(
+            "color:#00cc66; font-family:monospace; font-size:11px; background:transparent;");
+        m_updateStatus->setText("✓  Installing update... app will restart automatically.");
+        m_downloadBtn->setEnabled(false);
+        m_installBtn->setEnabled(false);
+        m_cancelBtn->hide();
+    });
 }
 
 void NewsTab::buildUI() {
@@ -133,17 +153,14 @@ void NewsTab::buildUI() {
     tbl->addWidget(title);
     tbl->addWidget(m_versionLabel);
     tbl->addStretch();
-    // Bell lives in topBar visually but is also accessible via bell()
     m_bell->setParent(topBar);
     tbl->addWidget(m_bell);
-
     root->addWidget(topBar);
 
     // ── Scrollable body ───────────────────────────────────────────────────────
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
-    scroll->setStyleSheet(s() +
-        "QScrollArea { border:none; }");
+    scroll->setStyleSheet(s() + "QScrollArea { border:none; }");
 
     auto *body = new QWidget;
     body->setStyleSheet(s());
@@ -163,9 +180,7 @@ void NewsTab::buildUI() {
     qaTitle->setStyleSheet(
         "color:#00cc66; font-family:monospace; font-size:12px; font-weight:bold; "
         "letter-spacing:1px; background:transparent;");
-
-    auto *qaDesc = new QLabel(
-        "Jump straight to the tools you need.", qaCard);
+    auto *qaDesc = new QLabel("Jump straight to the tools you need.", qaCard);
     qaDesc->setStyleSheet("color:#444; font-family:monospace; font-size:11px; background:transparent;");
 
     auto *btnRow = new QWidget(qaCard);
@@ -175,13 +190,10 @@ void NewsTab::buildUI() {
 
     auto *scrBtn = actionBtn("⬡  OPEN DEVTOOLS / SCRAPPER", "#00cc66", btnRow);
     auto *brBtn  = actionBtn("◎  OPEN BROWSER",             "#0088ff", btnRow);
-
     connect(scrBtn, &QPushButton::clicked, this, &NewsTab::openScrapper);
     connect(brBtn,  &QPushButton::clicked, this, &NewsTab::openBrowser);
-
     brl->addWidget(scrBtn); brl->addWidget(brBtn); brl->addStretch();
 
-    // Mini stats row
     auto *statsRow = new QWidget(qaCard);
     statsRow->setStyleSheet("background:transparent;");
     auto *srl = new QHBoxLayout(statsRow);
@@ -211,7 +223,6 @@ void NewsTab::buildUI() {
     qal->addWidget(separator(qaCard));
     qal->addWidget(btnRow);
     qal->addWidget(statsRow);
-
     bl->addWidget(qaCard);
 
     // ── Update card ───────────────────────────────────────────────────────────
@@ -232,29 +243,98 @@ void NewsTab::buildUI() {
     m_updateStatus->setStyleSheet(
         "color:#444; font-family:monospace; font-size:11px; background:transparent;");
 
+    // Progress bar (hidden until download starts)
+    m_progressWrap = new QWidget(updCard);
+    m_progressWrap->hide();
+    m_progressWrap->setStyleSheet("background:transparent;");
+    auto *pwl = new QHBoxLayout(m_progressWrap);
+    pwl->setContentsMargins(0,0,0,0); pwl->setSpacing(10);
+
+    auto *progOuter = new QWidget(m_progressWrap);
+    progOuter->setFixedHeight(4);
+    progOuter->setMinimumWidth(200);
+    progOuter->setStyleSheet("background:#1a1a00; border-radius:2px;");
+    auto *progInner = new QHBoxLayout(progOuter);
+    progInner->setContentsMargins(0,0,0,0); progInner->setSpacing(0);
+    m_progressFill = new QWidget(progOuter);
+    m_progressFill->setFixedWidth(0);
+    m_progressFill->setStyleSheet(
+        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 #997700, stop:1 #ffaa00); border-radius:2px;");
+    progInner->addWidget(m_progressFill);
+    progInner->addStretch();
+
+    m_progressLabel = new QLabel("0%", m_progressWrap);
+    m_progressLabel->setStyleSheet(
+        "color:#ffaa00; font-family:monospace; font-size:10px; background:transparent;");
+
+    pwl->addWidget(progOuter, 1);
+    pwl->addWidget(m_progressLabel);
+
+    // Button row
     auto *btnRow2 = new QWidget(updCard);
     btnRow2->setStyleSheet("background:transparent;");
     auto *br2l = new QHBoxLayout(btnRow2);
     br2l->setContentsMargins(0,0,0,0); br2l->setSpacing(10);
 
-    m_checkBtn    = actionBtn("↺  CHECK NOW",     "#888888", btnRow2);
-    m_downloadBtn = actionBtn("↓  DOWNLOAD UPDATE","#ffaa00", btnRow2);
-    m_downloadBtn->hide();
+    m_checkBtn    = actionBtn("↺  CHECK NOW",          "#888888", btnRow2);
+    m_downloadBtn = actionBtn("↓  DOWNLOAD UPDATE",    "#ffaa00", btnRow2);
+    m_installBtn  = actionBtn("⚡  INSTALL & RESTART", "#00cc66", btnRow2);
+    m_cancelBtn   = actionBtn("✕  CANCEL",             "#ff4444", btnRow2);
 
-    connect(m_checkBtn,    &QPushButton::clicked, this, &NewsTab::onManualCheck);
-    connect(m_downloadBtn, &QPushButton::clicked, this, [this](){
-        // download URL set when update is found
-        QString url = m_downloadBtn->property("url").toString();
-        if (!url.isEmpty()) QDesktopServices::openUrl(QUrl(url));
+    m_downloadBtn->hide();
+    m_installBtn->hide();
+    m_cancelBtn->hide();
+
+    connect(m_checkBtn, &QPushButton::clicked, this, &NewsTab::onManualCheck);
+
+    connect(m_downloadBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_checker || m_pendingInfo.downloadUrl.isEmpty()) return;
+        m_downloadBtn->setEnabled(false);
+        m_cancelBtn->show();
+        m_progressWrap->show();
+        m_updateStatus->setStyleSheet(
+            "color:#ffaa00; font-family:monospace; font-size:11px; background:transparent;");
+        m_updateStatus->setText(
+            QString("Downloading v%1...").arg(m_pendingInfo.version));
+        m_checker->startDownload(m_pendingInfo);
     });
 
-    br2l->addWidget(m_checkBtn); br2l->addWidget(m_downloadBtn); br2l->addStretch();
+    connect(m_installBtn, &QPushButton::clicked, this, [this]() {
+        if (m_downloadedPath.isEmpty()) return;
+        auto res = QMessageBox::question(this,
+            "Install Update",
+            QString("Install Nothing Browser v%1?\n\n"
+                    "The app will close and restart automatically.")
+                .arg(m_pendingInfo.version),
+            QMessageBox::Yes | QMessageBox::No);
+        if (res == QMessageBox::Yes)
+            m_checker->installUpdate(m_downloadedPath);
+    });
+
+    connect(m_cancelBtn, &QPushButton::clicked, this, [this]() {
+        if (m_checker) m_checker->cancelDownload();
+        m_progressWrap->hide();
+        m_cancelBtn->hide();
+        m_downloadBtn->setEnabled(true);
+        m_installBtn->hide();
+        m_progressFill->setFixedWidth(0);
+        m_updateStatus->setText(
+            QString("🔔 Update available: v%1  —  download cancelled")
+                .arg(m_pendingInfo.version));
+    });
+
+    br2l->addWidget(m_checkBtn);
+    br2l->addWidget(m_downloadBtn);
+    br2l->addWidget(m_installBtn);
+    br2l->addWidget(m_cancelBtn);
+    br2l->addStretch();
 
     udl->addWidget(udTitle);
     udl->addWidget(m_updateStatus);
+    udl->addWidget(m_progressWrap);
     udl->addWidget(separator(updCard));
     udl->addWidget(btnRow2);
-
     bl->addWidget(updCard);
 
     // ── Changelog card ────────────────────────────────────────────────────────
@@ -276,7 +356,6 @@ void NewsTab::buildUI() {
     m_changelogLayout->setContentsMargins(0,0,0,0);
     m_changelogLayout->setSpacing(4);
 
-    // Seed with local known changelog (overwritten when server responds)
     renderChangelog({
         {"fix",    "Copy buttons now work across all panels"},
         {"fix",    "FingerprintSpoofer missing QStringList include"},
@@ -295,7 +374,6 @@ void NewsTab::buildUI() {
     cll->addWidget(clTitle);
     cll->addWidget(separator(clCard));
     cll->addWidget(m_changelogWidget);
-
     bl->addWidget(clCard);
     bl->addStretch();
 
@@ -303,14 +381,15 @@ void NewsTab::buildUI() {
     root->addWidget(scroll, 1);
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  Changelog renderer
+// ═════════════════════════════════════════════════════════════════════════════
 void NewsTab::renderChangelog(const QList<ChangeEntry> &entries) {
-    // Clear old entries
     QLayoutItem *item;
     while ((item = m_changelogLayout->takeAt(0)) != nullptr) {
         delete item->widget();
         delete item;
     }
-
     for (auto &e : entries) {
         QString color = e.type == "added"  ? "#00cc66" :
                         e.type == "fix"    ? "#0088ff" :
@@ -318,34 +397,44 @@ void NewsTab::renderChangelog(const QList<ChangeEntry> &entries) {
         QString tag   = e.type == "added"  ? "[+]" :
                         e.type == "fix"    ? "[F]" :
                         e.type == "coming" ? "[→]" : "[*]";
-
         auto *row = new QLabel(
             QString("<span style='color:%1; font-weight:bold;'>%2</span>"
                     "<span style='color:#555;'>  %3</span>")
                 .arg(color).arg(tag).arg(e.text.toHtmlEscaped()),
             m_changelogWidget);
-        row->setStyleSheet(
-            "font-family:monospace; font-size:11px; background:transparent;");
+        row->setStyleSheet("font-family:monospace; font-size:11px; background:transparent;");
         m_changelogLayout->addWidget(row);
     }
 }
 
+// ═════════════════════════════════════════════════════════════════════════════
+//  Progress bar helper
+// ═════════════════════════════════════════════════════════════════════════════
+void NewsTab::setDownloadProgress(int pct) {
+    m_progressLabel->setText(QString("%1%").arg(pct));
+    int outerW = m_progressWrap->width() - m_progressLabel->width() - 16;
+    if (outerW > 0)
+        m_progressFill->setFixedWidth(outerW * pct / 100);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Update checker callbacks
+// ═════════════════════════════════════════════════════════════════════════════
 void NewsTab::onUpdateAvailable(const VersionInfo &info) {
+    m_pendingInfo = info;
+
     m_updateStatus->setStyleSheet(
         "color:#ffaa00; font-family:monospace; font-size:11px; background:transparent;");
     m_updateStatus->setText(
-        QString("🔔 Update available: v%1  (you have v%2)")
+        QString("🔔  Update available: v%1  (you have v%2)  —  click DOWNLOAD UPDATE to get it")
             .arg(info.version).arg(UpdateChecker::CURRENT_VERSION));
 
-    if (!info.downloadUrl.isEmpty()) {
-        m_downloadBtn->setProperty("url", info.downloadUrl);
-        m_downloadBtn->show();
-    }
+    m_downloadBtn->show();
+    m_installBtn->hide();
+    m_bell->setUnread(1);
+
     if (!info.changelog.isEmpty())
         renderChangelog(info.changelog);
-
-    m_bell->setUnread(1);
-    setUpdateBanner(true, info.version, info.downloadUrl);
 }
 
 void NewsTab::onNoUpdate(const VersionInfo &info) {
@@ -356,7 +445,9 @@ void NewsTab::onNoUpdate(const VersionInfo &info) {
             .arg(UpdateChecker::CURRENT_VERSION)
             .arg(QDateTime::currentDateTime().toString("hh:mm dd MMM")));
     m_downloadBtn->hide();
+    m_installBtn->hide();
     m_bell->clearUnread();
+
     if (!info.changelog.isEmpty())
         renderChangelog(info.changelog);
 }
@@ -364,20 +455,45 @@ void NewsTab::onNoUpdate(const VersionInfo &info) {
 void NewsTab::onCheckFailed(const QString &err) {
     m_updateStatus->setStyleSheet(
         "color:#555; font-family:monospace; font-size:11px; background:transparent;");
-    m_updateStatus->setText(
-        "⚠  Could not reach update server  —  " + err);
+    m_updateStatus->setText("⚠  Could not reach update server  —  " + err);
 }
 
 void NewsTab::onManualCheck() {
     m_updateStatus->setStyleSheet(
         "color:#444; font-family:monospace; font-size:11px; background:transparent;");
     m_updateStatus->setText("Checking...");
+    m_downloadBtn->hide();
+    m_installBtn->hide();
+    m_progressWrap->hide();
     if (m_checker) m_checker->checkNow();
 }
 
-void NewsTab::setUpdateBanner(bool hasUpdate, const QString &version,
-                               const QString &) {
-    // Could flash the tab title in MainWindow — for now just update status
-    // MainWindow can connect to updateAvailable signal directly for tab label flash
-    Q_UNUSED(hasUpdate); Q_UNUSED(version);
+void NewsTab::onDownloadReady(const QString &path, const VersionInfo &info) {
+    m_downloadedPath = path;
+    m_pendingInfo    = info;
+
+    m_cancelBtn->hide();
+    m_progressWrap->hide();
+    m_installBtn->show();
+    m_downloadBtn->hide();
+
+    m_updateStatus->setStyleSheet(
+        "color:#00cc66; font-family:monospace; font-size:11px; background:transparent;");
+    m_updateStatus->setText(
+        QString("✓  v%1 downloaded  —  click INSTALL & RESTART to apply the update")
+            .arg(info.version));
+
+    m_bell->setUnread(1);
 }
+
+void NewsTab::onDownloadFailed(const QString &err) {
+    m_cancelBtn->hide();
+    m_progressWrap->hide();
+    m_downloadBtn->setEnabled(true);
+
+    m_updateStatus->setStyleSheet(
+        "color:#ff4444; font-family:monospace; font-size:11px; background:transparent;");
+    m_updateStatus->setText("✕  Download failed  —  " + err);
+}
+
+void NewsTab::setUpdateBanner(bool, const QString &, const QString &) {}
