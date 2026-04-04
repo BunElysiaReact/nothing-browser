@@ -11,6 +11,7 @@
 #include "../tabs/DevToolsPanel.h"
 #include "../tabs/NewsTab.h"
 #include "../engine/UpdateChecker.h"
+#include "../tabs/PluginsTab.h"
 
 class BrowserTab;
 class YoutubeTab;
@@ -39,6 +40,7 @@ private:
     BrowserTab     *m_browser;
     YoutubeTab     *m_youtube;
     NewsTab        *m_news;
+    PluginsTab *m_plugins;
 
     UpdateChecker  *m_checker;
 

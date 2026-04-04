@@ -233,10 +233,28 @@ void NewsTab::buildUI() {
     udl->setContentsMargins(20, 16, 20, 16);
     udl->setSpacing(10);
 
-    auto *udTitle = new QLabel("🔔  UPDATES", updCard);
+    // Add bun logo to the update card top bar row
+    auto *topRow = new QWidget(updCard);
+    topRow->setStyleSheet("background:transparent;");
+    auto *trl = new QHBoxLayout(topRow);
+    trl->setContentsMargins(0, 0, 0, 0);
+    trl->setSpacing(10);
+    
+    auto *bunLogo = new QLabel(topRow);
+    bunLogo->setPixmap(QPixmap(":/icons/bunlogo1.jpeg").scaled(
+        48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    bunLogo->setStyleSheet("opacity: 0.6; border-radius: 6px; background:transparent;");
+    
+    auto *udTitle = new QLabel("🔔  UPDATES", topRow);
     udTitle->setStyleSheet(
         "color:#ffaa00; font-family:monospace; font-size:12px; font-weight:bold; "
         "letter-spacing:1px; background:transparent;");
+    
+    trl->addWidget(bunLogo);
+    trl->addWidget(udTitle);
+    trl->addStretch();
+    
+    udl->addWidget(topRow);
 
     m_updateStatus = new QLabel("Checking for updates...", updCard);
     m_updateStatus->setWordWrap(true);
@@ -330,7 +348,6 @@ void NewsTab::buildUI() {
     br2l->addWidget(m_cancelBtn);
     br2l->addStretch();
 
-    udl->addWidget(udTitle);
     udl->addWidget(m_updateStatus);
     udl->addWidget(m_progressWrap);
     udl->addWidget(separator(updCard));

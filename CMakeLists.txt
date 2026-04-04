@@ -24,6 +24,8 @@ add_executable(nothing-browser
     core/engine/IdentityGenerator.cpp
     core/engine/IdentityStore.cpp
     assets/resources.qrc
+    core/engine/PluginManager.cpp
+    core/tabs/PluginsTab.cpp
 )
 
 target_include_directories(nothing-browser PRIVATE

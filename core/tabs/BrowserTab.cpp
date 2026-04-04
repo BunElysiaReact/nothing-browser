@@ -9,6 +9,7 @@
 #include <QWebEnginePage>
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
+#include <QWebEngineNewWindowRequest>
 
 BrowserTab::BrowserTab(QWidget *parent) : QWidget(parent) {
     setupUI();
@@ -93,16 +94,18 @@ void BrowserTab::setupWebEngine() {
     profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
     profile->setHttpUserAgent(spoofer.identity().userAgent);
 
-    // Spoof script — now runs on subframes too
-    // Fixes: hidden iframe leaks that CreepJS uses to catch spoofing
+    // Fingerprint spoof script
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
-    QString _s = spoofer.injectionScript(); qDebug() << "[NB C++] script length:" << _s.size(); spoofScript.setSourceCode(_s);
+    QString _s = spoofer.injectionScript();
+    qDebug() << "[NB C++] script length:" << _s.size();
+    spoofScript.setSourceCode(_s);
     spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
+    // Capture script
     QWebEngineScript capScript;
     capScript.setName("nothing_capture");
     capScript.setSourceCode(NetworkCapture::captureScript());
@@ -117,9 +120,22 @@ void BrowserTab::setupWebEngine() {
             this,           &BrowserTab::requestCaptured);
 
     auto *page = new QWebEnginePage(profile, this);
-
-    // Fixes hasKnownBgColor — QtWebEngine's default bg is detectable
     page->setBackgroundColor(Qt::white);
+
+    // ── Popup / new-tab interception ──────────────────────────────────────────
+    // Sites like movie streamers open a new tab to trigger the real player URL.
+    // Without this, QtWebEngine just drops the request and the player never loads.
+    // We intercept it and navigate the current view instead — same-tab behavior.
+    connect(page, &QWebEnginePage::newWindowRequested,
+            this, [this](QWebEngineNewWindowRequest &req) {
+        QUrl url = req.requestedUrl();
+        if (url.isEmpty() || !url.isValid()) return;
+
+        // Update the URL bar and load in-place
+        m_urlBar->setText(url.toString());
+        m_view->load(url);
+        req.openIn(m_view->page());
+    });
 
     m_view->setPage(page);
 
@@ -136,6 +152,7 @@ void BrowserTab::setupWebEngine() {
 
     connect(m_view, &QWebEngineView::urlChanged, this, &BrowserTab::onUrlChanged);
     applySettings();
+    PluginManager::instance().injectAll(profile);
 }
 
 void BrowserTab::applySettings() {

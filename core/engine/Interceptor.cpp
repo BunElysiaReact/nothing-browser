@@ -13,10 +13,7 @@ void Interceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36");
 
-    // ── Client Hints — fixes uaDataIsBlank ───────────────────────────────────
-    // CreepJS checks navigator.userAgentData AND these headers.
-    // If the UA string says Chrome 124 but Sec-CH-UA is missing or says
-    // "QtWebEngine", it's an instant detection flag.
+    // ── Client Hints ──────────────────────────────────────────────────────────
     info.setHttpHeader("Sec-CH-UA",
         "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", "
         "\"Not-A.Brand\";v=\"99\"");
@@ -27,8 +24,7 @@ void Interceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     info.setHttpHeader("Accept-Language", "en-US,en;q=0.9");
     info.setHttpHeader("Accept-Encoding", "gzip, deflate, br");
 
-    // ── Sec-Fetch headers — match real Chrome behavior ────────────────────────
-    // Missing Sec-Fetch-* is a strong bot signal
+    // ── Sec-Fetch headers ─────────────────────────────────────────────────────
     auto type = info.resourceType();
     using RT = QWebEngineUrlRequestInfo;
 
@@ -52,9 +48,10 @@ void Interceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     info.setHttpHeader("Sec-Fetch-User",
         (type == RT::ResourceTypeMainFrame) ? "?1" : "");
 
-    // ── Block junk on non-essential resource types ────────────────────────────
-    bool isJunk = (type == RT::ResourceTypeMedia);
-    if (isJunk) { info.block(true); return; }
+    // NOTE: ResourceTypeMedia is NO LONGER blocked.
+    // Blocking it was killing the CDN token fetch chain — sites serve
+    // short-lived signed URLs via media requests; blocking them meant
+    // every captured URL was already dead before you could use it.
 
     QString method  = QString::fromLatin1(info.requestMethod());
     QString headers = QString("Method: %1\nURL: %2\nType: %3\nTime: %4")

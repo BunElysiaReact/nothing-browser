@@ -6,6 +6,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include "../engine/NetworkCapture.h"
+#include "../engine/PluginManager.h"
 
 class Interceptor;
 

@@ -175,6 +175,7 @@ void MainWindow::setupTabs() {
     m_browser  = new BrowserTab(m_main);
     m_youtube  = new YoutubeTab(m_main);
     m_news     = new NewsTab(m_main);
+    m_plugins  = new PluginsTab(m_main);
 
     m_news->attachChecker(m_checker);
 
@@ -198,6 +199,7 @@ void MainWindow::setupTabs() {
     m_tabs->addTab(m_browser,  tabIcon("#0088ff"), "BROWSER");
     m_tabs->addTab(m_youtube,  tabIcon("#ff4444"), "YOUTUBE");
     m_tabs->addTab(m_news,     tabIcon("#ffaa00"), "TECH HOUSE");
+    m_tabs->addTab(m_plugins,  tabIcon("#cc44ff"), "PLUGINS");
 
     auto *cap = m_browser->networkCapture();
     connect(cap, &NetworkCapture::requestCaptured,
