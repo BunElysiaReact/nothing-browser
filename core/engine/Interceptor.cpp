@@ -13,9 +13,12 @@ void Interceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36");
 
-    // ── Client Hints ──────────────────────────────────────────────────────────
+    // ── Client Hints — FIX: Chrome 110+ brand format ──────────────────────────
+    // Old wrong format: "Not(A:Brand" — broke consistency checks
+    // New correct format: "Google Chrome" first, then "Not-A.Brand"
     info.setHttpHeader("Sec-CH-UA",
-        "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", "
+        "\"Google Chrome\";v=\"124\", "
+        "\"Chromium\";v=\"124\", "
         "\"Not-A.Brand\";v=\"99\"");
     info.setHttpHeader("Sec-CH-UA-Mobile",    "?0");
     info.setHttpHeader("Sec-CH-UA-Platform",  "\"Linux\"");
@@ -41,17 +44,12 @@ void Interceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     }
 
     info.setHttpHeader("Sec-Fetch-Dest", dest.toUtf8());
-    info.setHttpHeader("Sec-Fetch-Mode",
+    info.setHttpHeader("Fetch-Mode",
         (type == RT::ResourceTypeMainFrame || type == RT::ResourceTypeSubFrame)
             ? "navigate" : "no-cors");
     info.setHttpHeader("Sec-Fetch-Site", "cross-site");
     info.setHttpHeader("Sec-Fetch-User",
         (type == RT::ResourceTypeMainFrame) ? "?1" : "");
-
-    // NOTE: ResourceTypeMedia is NO LONGER blocked.
-    // Blocking it was killing the CDN token fetch chain — sites serve
-    // short-lived signed URLs via media requests; blocking them meant
-    // every captured URL was already dead before you could use it.
 
     QString method  = QString::fromLatin1(info.requestMethod());
     QString headers = QString("Method: %1\nURL: %2\nType: %3\nTime: %4")

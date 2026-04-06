@@ -3,6 +3,34 @@
 #include <QUrl>
 #include <QDateTime>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
+
+// ── BgWidget: paints Bun logo centered, low opacity ───────────────────────────
+class NewsBgWidget : public QWidget {
+public:
+    explicit NewsBgWidget(QWidget *parent = nullptr) : QWidget(parent) {
+        m_pix = QPixmap(":/icons/bunlogo1.jpeg");
+        setAttribute(Qt::WA_StyledBackground, true);
+    }
+protected:
+    void paintEvent(QPaintEvent *e) override {
+        QWidget::paintEvent(e);
+        if (m_pix.isNull()) return;
+        QPainter p(this);
+        p.setOpacity(0.04);  // 4% — visible but doesn't fight the text
+        QSize scaled = m_pix.size().scaled(420, 420, Qt::KeepAspectRatio);
+        QRect r(
+            (width()  - scaled.width())  / 2,
+            (height() - scaled.height()) / 2,
+            scaled.width(),
+            scaled.height()
+        );
+        p.drawPixmap(r, m_pix.scaled(scaled, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+private:
+    QPixmap m_pix;
+};
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Shared style
@@ -105,12 +133,10 @@ NewsTab::NewsTab(QWidget *parent) : QWidget(parent) {
 void NewsTab::attachChecker(UpdateChecker *checker) {
     m_checker = checker;
 
-    // Version check signals
     connect(checker, &UpdateChecker::updateAvailable, this, &NewsTab::onUpdateAvailable);
     connect(checker, &UpdateChecker::noUpdate,        this, &NewsTab::onNoUpdate);
     connect(checker, &UpdateChecker::checkFailed,     this, &NewsTab::onCheckFailed);
 
-    // Download signals
     connect(checker, &UpdateChecker::downloadProgress, this, [this](int pct) {
         setDownloadProgress(pct);
     });
@@ -157,12 +183,13 @@ void NewsTab::buildUI() {
     tbl->addWidget(m_bell);
     root->addWidget(topBar);
 
-    // ── Scrollable body ───────────────────────────────────────────────────────
+    // ── Scrollable body with Bun background ───────────────────────────────────
     auto *scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setStyleSheet(s() + "QScrollArea { border:none; }");
 
-    auto *body = new QWidget;
+    // Use BgWidget so Bun logo renders behind all content
+    auto *body = new NewsBgWidget;
     body->setStyleSheet(s());
     auto *bl = new QVBoxLayout(body);
     bl->setContentsMargins(32, 24, 32, 32);
@@ -171,7 +198,7 @@ void NewsTab::buildUI() {
     // ── Quick Access panel ────────────────────────────────────────────────────
     auto *qaCard = new QWidget(body);
     qaCard->setStyleSheet(
-        "QWidget { background:#111111; border:1px solid #1e1e1e; border-radius:4px; }");
+        "QWidget { background:rgba(17,17,17,0.92); border:1px solid #1e1e1e; border-radius:4px; }");
     auto *qal = new QVBoxLayout(qaCard);
     qal->setContentsMargins(20, 16, 20, 16);
     qal->setSpacing(12);
@@ -225,35 +252,38 @@ void NewsTab::buildUI() {
     qal->addWidget(statsRow);
     bl->addWidget(qaCard);
 
-    // ── Update card ───────────────────────────────────────────────────────────
+    // ── Update / Announcements card — Bun logo visible through it ────────────
+    // Semi-transparent background so the body Bun bg bleeds through
     auto *updCard = new QWidget(body);
     updCard->setStyleSheet(
-        "QWidget { background:#111111; border:1px solid #1e1e1e; border-radius:4px; }");
+        "QWidget { background:rgba(17,17,17,0.88); border:1px solid #1e1e1e; border-radius:4px; }");
     auto *udl = new QVBoxLayout(updCard);
     udl->setContentsMargins(20, 16, 20, 16);
     udl->setSpacing(10);
 
-    // Add bun logo to the update card top bar row
+    // Header row — Bun logo inline + title
     auto *topRow = new QWidget(updCard);
     topRow->setStyleSheet("background:transparent;");
     auto *trl = new QHBoxLayout(topRow);
     trl->setContentsMargins(0, 0, 0, 0);
-    trl->setSpacing(10);
-    
+    trl->setSpacing(12);
+
     auto *bunLogo = new QLabel(topRow);
-    bunLogo->setPixmap(QPixmap(":/icons/bunlogo1.jpeg").scaled(
-        48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-    bunLogo->setStyleSheet("opacity: 0.6; border-radius: 6px; background:transparent;");
-    
-    auto *udTitle = new QLabel("🔔  UPDATES", topRow);
+    QPixmap bunPix(":/icons/bunlogo1.jpeg");
+    if (!bunPix.isNull()) {
+        bunLogo->setPixmap(bunPix.scaled(40, 40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+    bunLogo->setStyleSheet("background:transparent; border-radius:4px;");
+
+    auto *udTitle = new QLabel("🔔  ANNOUNCEMENTS & UPDATES", topRow);
     udTitle->setStyleSheet(
         "color:#ffaa00; font-family:monospace; font-size:12px; font-weight:bold; "
         "letter-spacing:1px; background:transparent;");
-    
+
     trl->addWidget(bunLogo);
     trl->addWidget(udTitle);
     trl->addStretch();
-    
+
     udl->addWidget(topRow);
 
     m_updateStatus = new QLabel("Checking for updates...", updCard);
@@ -261,7 +291,7 @@ void NewsTab::buildUI() {
     m_updateStatus->setStyleSheet(
         "color:#444; font-family:monospace; font-size:11px; background:transparent;");
 
-    // Progress bar (hidden until download starts)
+    // Progress bar
     m_progressWrap = new QWidget(updCard);
     m_progressWrap->hide();
     m_progressWrap->setStyleSheet("background:transparent;");
@@ -357,7 +387,7 @@ void NewsTab::buildUI() {
     // ── Changelog card ────────────────────────────────────────────────────────
     auto *clCard = new QWidget(body);
     clCard->setStyleSheet(
-        "QWidget { background:#111111; border:1px solid #1e1e1e; border-radius:4px; }");
+        "QWidget { background:rgba(17,17,17,0.92); border:1px solid #1e1e1e; border-radius:4px; }");
     auto *cll = new QVBoxLayout(clCard);
     cll->setContentsMargins(20, 16, 20, 16);
     cll->setSpacing(8);
@@ -374,15 +404,16 @@ void NewsTab::buildUI() {
     m_changelogLayout->setSpacing(4);
 
     renderChangelog({
+        {"fix",    "sec-ch-ua brand string updated to Chrome 110+ format"},
+        {"fix",    "Canvas PRNG replaced: sin() → xorshift (uniqueness ~70% now)"},
+        {"added",  "navigator.userAgentData injection (brands + getHighEntropyValues)"},
+        {"added",  "WebGL UNMASKED_VENDOR + UNMASKED_RENDERER params spoofed"},
         {"fix",    "Copy buttons now work across all panels"},
         {"fix",    "FingerprintSpoofer missing QStringList include"},
-        {"fix",    "NetworkCapture missing QTimer include"},
         {"added",  "Full DevTools panel: Network / WS / Cookies / Storage / Export"},
         {"added",  "WebSocket frame capture + download"},
         {"added",  "Cookie request inspector (Set-By Request tab)"},
-        {"added",  "Firefox-style request summary + raw HTTP view"},
         {"added",  "Welcome screen with scroll-to-accept"},
-        {"added",  "Download button on every capture panel"},
         {"coming", "v0.2 — Windows support + response body search"},
         {"coming", "v0.3 — Built-in captcha solver"},
         {"coming", "v0.4 — Script marketplace + headless mode"},
@@ -439,17 +470,14 @@ void NewsTab::setDownloadProgress(int pct) {
 // ═════════════════════════════════════════════════════════════════════════════
 void NewsTab::onUpdateAvailable(const VersionInfo &info) {
     m_pendingInfo = info;
-
     m_updateStatus->setStyleSheet(
         "color:#ffaa00; font-family:monospace; font-size:11px; background:transparent;");
     m_updateStatus->setText(
         QString("🔔  Update available: v%1  (you have v%2)  —  click DOWNLOAD UPDATE to get it")
             .arg(info.version).arg(UpdateChecker::CURRENT_VERSION));
-
     m_downloadBtn->show();
     m_installBtn->hide();
     m_bell->setUnread(1);
-
     if (!info.changelog.isEmpty())
         renderChangelog(info.changelog);
 }
@@ -464,7 +492,6 @@ void NewsTab::onNoUpdate(const VersionInfo &info) {
     m_downloadBtn->hide();
     m_installBtn->hide();
     m_bell->clearUnread();
-
     if (!info.changelog.isEmpty())
         renderChangelog(info.changelog);
 }
@@ -488,18 +515,15 @@ void NewsTab::onManualCheck() {
 void NewsTab::onDownloadReady(const QString &path, const VersionInfo &info) {
     m_downloadedPath = path;
     m_pendingInfo    = info;
-
     m_cancelBtn->hide();
     m_progressWrap->hide();
     m_installBtn->show();
     m_downloadBtn->hide();
-
     m_updateStatus->setStyleSheet(
         "color:#00cc66; font-family:monospace; font-size:11px; background:transparent;");
     m_updateStatus->setText(
         QString("✓  v%1 downloaded  —  click INSTALL & RESTART to apply the update")
             .arg(info.version));
-
     m_bell->setUnread(1);
 }
 
@@ -507,7 +531,6 @@ void NewsTab::onDownloadFailed(const QString &err) {
     m_cancelBtn->hide();
     m_progressWrap->hide();
     m_downloadBtn->setEnabled(true);
-
     m_updateStatus->setStyleSheet(
         "color:#ff4444; font-family:monospace; font-size:11px; background:transparent;");
     m_updateStatus->setText("✕  Download failed  —  " + err);

@@ -10,12 +10,6 @@
 #include <QTimeZone>
 #include <thread>
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Read REAL machine values at runtime
-//  No fake profiles — we report what the machine actually is
-//  CreepJS cross-validates APIs against each other — lying fails the test
-//  Brave's insight: don't lie, just add noise so you can't be tracked
-// ─────────────────────────────────────────────────────────────────────────────
 BrowserIdentity IdentityGenerator::generate() {
     auto *rng = QRandomGenerator::global();
 
@@ -25,8 +19,8 @@ BrowserIdentity IdentityGenerator::generate() {
     id.cpuCores = (int)std::thread::hardware_concurrency();
     if (id.cpuCores < 1) id.cpuCores = 4;
 
-    // ── Real RAM — read from /proc/meminfo ────────────────────────────────────
-    id.ramGb = 8; // default
+    // ── Real RAM ──────────────────────────────────────────────────────────────
+    id.ramGb = 8;
     QFile meminfo("/proc/meminfo");
     if (meminfo.open(QIODevice::ReadOnly)) {
         QString line = meminfo.readLine();
@@ -34,7 +28,6 @@ BrowserIdentity IdentityGenerator::generate() {
             if (line.startsWith("MemTotal:")) {
                 long long kb = line.split(QRegularExpression("\\s+"))[1].toLongLong();
                 long long gb = kb / 1024 / 1024;
-                // Round to nearest power of 2 (same as Chrome reports)
                 if      (gb <= 1)  id.ramGb = 1;
                 else if (gb <= 2)  id.ramGb = 2;
                 else if (gb <= 4)  id.ramGb = 4;
@@ -80,12 +73,10 @@ BrowserIdentity IdentityGenerator::generate() {
     // ── Language ──────────────────────────────────────────────────────────────
     id.language = "en-US";
 
-    // ── GPU — read real GPU from /proc or glxinfo ─────────────────────────────
-    // We report the real GPU — lying about GPU fails WebGL cross-validation
-    id.gpuVendorFull = "Google Inc.";
-    id.gpuRenderer   = "ANGLE (Mesa, Mesa Intel(R) HD Graphics 3000 (SNB GT2), OpenGL 4.6)";
+    // ── GPU ───────────────────────────────────────────────────────────────────
+    id.gpuVendorFull = "Google Inc. (Intel)";
+    id.gpuRenderer   = "ANGLE (Intel, Mesa Intel(R) HD Graphics 3000 (SNB GT2), OpenGL 4.6)";
 
-    // Try to read real GPU from /sys
     QFile gpuFile("/sys/class/drm/card0/device/vendor");
     if (gpuFile.open(QIODevice::ReadOnly)) {
         QString vendorId = QString(gpuFile.readAll()).trimmed();
@@ -94,17 +85,14 @@ BrowserIdentity IdentityGenerator::generate() {
         else                           id.gpuVendorFull = "Google Inc. (Intel)";
     }
 
-    // ── Chrome version — pick a recent realistic version ─────────────────────
-    // Use a fixed recent version — don't randomise, randomising looks suspicious
+    // ── Chrome version ────────────────────────────────────────────────────────
     id.chromeVersion = 124;
 
-    // ── UA ────────────────────────────────────────────────────────────────────
+    // ── UA + sec-ch-ua ────────────────────────────────────────────────────────
     id.userAgent = buildUserAgent(id.os, id.chromeVersion);
     id.secChUa   = buildSecChUa(id.chromeVersion);
 
-    // ── Noise seeds — NEW every session ───────────────────────────────────────
-    // This is the Brave approach: consistent within session, different per session
-    // Canvas/audio/webgl hashes will differ every session = can't track you
+    // ── Noise seeds ───────────────────────────────────────────────────────────
     id.canvasSeed = rng->generateDouble();
     id.audioSeed  = rng->generateDouble();
     id.webglSeed  = rng->generateDouble();
@@ -124,11 +112,14 @@ QString IdentityGenerator::buildUserAgent(const QString &os, int cv) {
     ).arg(os).arg(cv);
 }
 
+// FIX 1: Chrome 110+ changed brand string format and order
+// Old: "Chromium";v="X", "Not(A:Brand";v="24", "Google Chrome";v="X"
+// New: "Google Chrome";v="X", "Chromium";v="X", "Not-A.Brand";v="99"
 QString IdentityGenerator::buildSecChUa(int cv) {
     return QString(
+        "\"Google Chrome\";v=\"%1\", "
         "\"Chromium\";v=\"%1\", "
-        "\"Not(A:Brand\";v=\"24\", "
-        "\"Google Chrome\";v=\"%1\""
+        "\"Not-A.Brand\";v=\"99\""
     ).arg(cv);
 }
 
@@ -136,7 +127,6 @@ QString IdentityGenerator::generateId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 
-// ── JSON serialization ────────────────────────────────────────────────────────
 QJsonObject BrowserIdentity::toJson() const {
     QJsonObject o;
     o["identity_id"]    = identityId;

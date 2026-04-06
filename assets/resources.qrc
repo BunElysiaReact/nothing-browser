@@ -3,5 +3,7 @@
         <file>icons/logo.svg</file>
         <file>icons/elysialogo.svg</file>
         <file>icons/bunlogo1.jpeg</file>
+        <file>icons/3-dots-bounce.svg</file>
+        <file>icons/elysia.jpeg</file>
     </qresource>
 </RCC>

@@ -3,6 +3,7 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QPixmap>
+#include <QPainter>
 
 QString PluginsTab::panelStyle() {
     return R"(
@@ -62,6 +63,32 @@ static QLabel *valueLabel(const QString &text, const QString &color, QWidget *p)
     return l;
 }
 
+// ── BgWidget: paints a centered, low-opacity pixmap behind children ──────────
+class BgWidget : public QWidget {
+public:
+    explicit BgWidget(const QPixmap &pix, QWidget *parent = nullptr)
+        : QWidget(parent), m_pix(pix) {
+        setAttribute(Qt::WA_StyledBackground, true);
+    }
+protected:
+    void paintEvent(QPaintEvent *e) override {
+        QWidget::paintEvent(e);
+        if (m_pix.isNull()) return;
+        QPainter p(this);
+        p.setOpacity(0.05);  // very subtle — 5% opacity
+        QSize scaled = m_pix.size().scaled(500, 500, Qt::KeepAspectRatio);
+        QRect r(
+            (width()  - scaled.width())  / 2,
+            (height() - scaled.height()) / 2,
+            scaled.width(),
+            scaled.height()
+        );
+        p.drawPixmap(r, m_pix.scaled(scaled, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+private:
+    QPixmap m_pix;
+};
+
 PluginsTab::PluginsTab(QWidget *parent) : QWidget(parent) {
     setStyleSheet(panelStyle());
     buildUI();
@@ -99,33 +126,11 @@ void PluginsTab::buildUI() {
     m_tabs = new QTabWidget(this);
 
     // ════════════════════════════════════════════════════
-    //  INSTALLED tab
+    //  INSTALLED tab — Elysia logo as background
     // ════════════════════════════════════════════════════
-    auto *instWidget = new QWidget;
-    instWidget->setStyleSheet(panelStyle());
-
-    // ── Elysia background image ───────────────────────────────────────────────
-    // Placed directly on instWidget, behind everything, centered, low opacity
-    auto *bgLabel = new QLabel(instWidget);
     QPixmap elysiaPix(":/icons/elysialogo.svg");
-    if (elysiaPix.isNull())
-        elysiaPix = QPixmap(":/icons/elysialogo.svg");
-    if (!elysiaPix.isNull()) {
-        bgLabel->setPixmap(elysiaPix.scaled(420, 420, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        bgLabel->setGeometry(
-            (instWidget->width()  - 420) / 2,
-            (instWidget->height() - 420) / 2,
-            420, 420
-        );
-        bgLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
-        bgLabel->setStyleSheet("opacity: 0.04; background: transparent;");
-        bgLabel->lower();
-
-        // Re-center when instWidget resizes
-        connect(instWidget, &QWidget::customContextMenuRequested, instWidget, [bgLabel, instWidget](){
-            bgLabel->move((instWidget->width()-420)/2, (instWidget->height()-420)/2);
-        });
-    }
+    auto *instWidget = new BgWidget(elysiaPix);
+    instWidget->setStyleSheet(panelStyle());
 
     auto *il = new QHBoxLayout(instWidget);
     il->setContentsMargins(0,0,0,0);
@@ -162,7 +167,7 @@ void PluginsTab::buildUI() {
     lw->addWidget(importBtn);
     il->addWidget(listWrap);
 
-    // Right: detail panel
+    // Right: detail panel — semi-transparent so bg shows through
     auto *detailWrap = new QWidget;
     detailWrap->setStyleSheet("background:transparent;");
     auto *dv = new QVBoxLayout(detailWrap);
