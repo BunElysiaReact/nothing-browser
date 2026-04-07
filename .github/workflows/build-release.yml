@@ -424,16 +424,14 @@ jobs:
             ### Install — Nothing Browser (full UI)
 
             **Linux (deb)**
-```bash
-            sudo dpkg -i nothing-browser_*_amd64.deb
-```
+
+                sudo dpkg -i nothing-browser_*_amd64.deb
 
             **Linux (tar.gz)**
-```bash
-            tar -xzf nothing-browser-*-linux-x86_64.tar.gz
-            cd nothing-browser-*-linux-x86_64
-            ./nothing-browser
-```
+
+                tar -xzf nothing-browser-*-linux-x86_64.tar.gz
+                cd nothing-browser-*-linux-x86_64
+                ./nothing-browser
 
             **Windows:** Download `.zip` → extract → run `nothing-browser.exe` (JRE bundled)
 
@@ -446,15 +444,13 @@ jobs:
             Used by the `nothingbrowser` scraping lib. No UI.
 
             **Linux (deb)**
-```bash
-            sudo dpkg -i nothing-browser-headless_*_amd64.deb
-```
+
+                sudo dpkg -i nothing-browser-headless_*_amd64.deb
 
             **Linux (tar.gz)**
-```bash
-            tar -xzf nothing-browser-headless-*-linux-x86_64.tar.gz
-            ./nothing-browser-headless
-```
+
+                tar -xzf nothing-browser-headless-*-linux-x86_64.tar.gz
+                ./nothing-browser-headless
 
             **Windows:** Download headless `.zip` → extract → run `nothing-browser-headless.exe`
 
