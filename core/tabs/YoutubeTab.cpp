@@ -338,11 +338,11 @@ void YoutubeTab::buildHomePage() {
     root->setContentsMargins(0,0,0,0);
     root->setSpacing(0);
 
-    // Background container with Elysia
-    auto *bgContainer = new QWidget(m_homePage);
+    // Background container with Elysia image
+    auto *bgContainer = new QLabel(m_homePage);
     bgContainer->setObjectName("elysiaBackground");
     bgContainer->setStyleSheet(R"(
-        QWidget#elysiaBackground {
+        QLabel#elysiaBackground {
             background-image: url(:/icons/elysia.jpeg);
             background-repeat: no-repeat;
             background-position: center;
@@ -351,18 +351,8 @@ void YoutubeTab::buildHomePage() {
     )");
     bgContainer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
-    // Dark overlay
-    auto *overlay = new QWidget(bgContainer);
-    auto pal = overlay->palette();
-    pal.setColor(QPalette::Window, QColor(0,0,0,165));
-    overlay->setAutoFillBackground(true);
-    overlay->setPalette(pal);
-
-    auto *bgLayout = new QVBoxLayout(bgContainer);
-    bgLayout->setContentsMargins(0,0,0,0);
-    bgLayout->addWidget(overlay);
-
-    auto *contentLayout = new QVBoxLayout(overlay);
+    // ── Content layout directly on bgContainer (no overlay) ─────────────────
+    auto *contentLayout = new QVBoxLayout(bgContainer);
     contentLayout->setContentsMargins(0,0,0,0);
     contentLayout->setSpacing(0);
     contentLayout->addStretch(2);
@@ -404,19 +394,20 @@ void YoutubeTab::buildHomePage() {
     m_homeSearch->setPlaceholderText("Search videos, music, anything...");
     m_homeSearch->setFixedHeight(48);
     m_homeSearch->setFixedWidth(580);
+    // Semi-transparent background so image shows through
     m_homeSearch->setStyleSheet(R"(
         QLineEdit {
-            background:rgba(255,255,255,0.08);
-            color:#f1f1f1;
-            border:1px solid rgba(255,255,255,0.2);
-            border-radius:24px;
-            padding:10px 24px;
-            font-size:14px;
-            font-family:'Segoe UI','Noto Sans',sans-serif;
+            background: rgba(0,0,0,0.55);
+            color: #f1f1f1;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 24px;
+            padding: 10px 24px;
+            font-size: 14px;
+            font-family: 'Segoe UI','Noto Sans',sans-serif;
         }
         QLineEdit:focus {
-            background:rgba(255,255,255,0.13);
-            border-color:#ff4444;
+            background: rgba(0,0,0,0.7);
+            border-color: #ff4444;
         }
     )");
     connect(m_homeSearch, &QLineEdit::returnPressed, this, &YoutubeTab::onHomeSearch);
@@ -427,12 +418,18 @@ void YoutubeTab::buildHomePage() {
     m_homeSearchBtn->setCursor(Qt::PointingHandCursor);
     m_homeSearchBtn->setStyleSheet(R"(
         QPushButton {
-            background:#ff4444; color:#fff;
-            border:none; border-radius:24px;
-            font-size:14px; font-weight:bold;
-            font-family:'Segoe UI',sans-serif;
+            background: rgba(0,0,0,0.65);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 24px;
+            font-size: 14px;
+            font-weight: bold;
+            font-family: 'Segoe UI',sans-serif;
         }
-        QPushButton:hover { background:#cc2222; }
+        QPushButton:hover {
+            background: #ff4444;
+            border-color: #ff4444;
+        }
     )");
     connect(m_homeSearchBtn, &QPushButton::clicked, this, &YoutubeTab::onHomeSearch);
 
@@ -471,7 +468,7 @@ void YoutubeTab::buildHomePage() {
 //  Results Page
 // ═════════════════════════════════════════════════════════════════════════════
 void YoutubeTab::buildResultsPage() {
-    m_resultsPage = new QWidget;
+    m_resultsPage = new QLabel;
     m_resultsPage->setObjectName("resultsPage");
     m_resultsPage->setStyleSheet(R"(
         QWidget#resultsPage {

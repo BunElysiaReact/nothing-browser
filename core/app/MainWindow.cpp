@@ -170,12 +170,13 @@ void MainWindow::setupTabs() {
     m_tabs = new QTabWidget(m_main);
     m_tabs->setMovable(false);
     m_tabs->setTabsClosable(false);
-
+    m_piggy = new PiggyTab(m_main);
     m_devtools = new DevToolsPanel(m_main);
     m_browser  = new BrowserTab(m_main);
     m_youtube  = new YoutubeTab(m_main);
     m_news     = new NewsTab(m_main);
     m_plugins  = new PluginsTab(m_main);
+    
 
     m_news->attachChecker(m_checker);
 
@@ -200,6 +201,7 @@ void MainWindow::setupTabs() {
     m_tabs->addTab(m_youtube,  tabIcon("#ff4444"), "YOUTUBE");
     m_tabs->addTab(m_news,     tabIcon("#ffaa00"), "TECH HOUSE");
     m_tabs->addTab(m_plugins,  tabIcon("#cc44ff"), "PLUGINS");
+    m_tabs->addTab(m_piggy, tabIcon("#ff6688"), "PIGGY TAB");
 
     auto *cap = m_browser->networkCapture();
     connect(cap, &NetworkCapture::requestCaptured,
@@ -216,6 +218,8 @@ void MainWindow::setupTabs() {
             m_devtools, &DevToolsPanel::onRawRequest);
 
     root->addWidget(m_tabs);
+    m_piggyServer = new PiggyServer(m_piggy, this);
+    m_piggyServer->start();
 }
 
 QIcon MainWindow::tabIcon(const QString &color) {
