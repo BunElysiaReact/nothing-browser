@@ -5,10 +5,10 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
-Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
+    Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
 find_package(OpenSSL REQUIRED)
 
-# ── Shared sources (both binaries use these) ──────────────────────────────────
+# ── Shared sources ────────────────────────────────────────────────────────────
 set(SHARED_SOURCES
     core/engine/PiggyServer.cpp
     core/engine/FingerprintSpoofer.cpp
@@ -18,7 +18,7 @@ set(SHARED_SOURCES
     core/tabs/PiggyTab.cpp
 )
 
-# ── Full browser (headful) ────────────────────────────────────────────────────
+# ── Full browser ──────────────────────────────────────────────────────────────
 add_executable(nothing-browser
     core/main.cpp
     core/app/MainWindow.cpp
@@ -30,18 +30,25 @@ add_executable(nothing-browser
     core/engine/UpdateChecker.cpp
     core/engine/PluginManager.cpp
     core/tabs/PluginsTab.cpp
-    core/tabs/NewsTab.cpp
     assets/resources.qrc
     ${SHARED_SOURCES}
 )
 
-# ── Headless binary (piggy daemon) ───────────────────────────────────────────
+# ── Headless binary ───────────────────────────────────────────────────────────
 add_executable(nothing-browser-headless
     core/main_headless.cpp
     ${SHARED_SOURCES}
 )
 
-# ── Link both ─────────────────────────────────────────────────────────────────
+# ── macOS bundle: full browser only ──────────────────────────────────────────
+set_target_properties(nothing-browser PROPERTIES
+    MACOSX_BUNDLE ON
+)
+set_target_properties(nothing-browser-headless PROPERTIES
+    MACOSX_BUNDLE OFF
+)
+
+# ── Common libs ───────────────────────────────────────────────────────────────
 set(COMMON_LIBS
     Qt6::Core
     Qt6::Gui
@@ -56,7 +63,6 @@ set(COMMON_LIBS
 
 target_include_directories(nothing-browser PRIVATE
     core core/app core/tabs core/engine core/bridge)
-
 target_include_directories(nothing-browser-headless PRIVATE
     core core/app core/tabs core/engine core/bridge)
 

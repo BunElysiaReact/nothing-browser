@@ -342,7 +342,7 @@ jobs:
           cmake -B build-mac \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="$QT_ROOT" \
-            -DCMAKE_MACOSX_BUNDLE=ON
+            
 
       - name: Build
         run: cmake --build build-mac --parallel
