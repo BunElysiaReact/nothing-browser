@@ -10,9 +10,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ═══════════════════════════════════════════════════════════════════════════
-  #  LINUX
-  # ═══════════════════════════════════════════════════════════════════════════
   build-linux:
     name: Build Linux
     runs-on: ubuntu-24.04
@@ -163,9 +160,6 @@ jobs:
             dist/nothing-browser-headless_*.deb
             dist/nothing-browser-headless-*-linux-x86_64.tar.gz
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  #  WINDOWS
-  # ═══════════════════════════════════════════════════════════════════════════
   build-windows:
     name: Build Windows
     runs-on: windows-latest
@@ -288,9 +282,6 @@ jobs:
           name: windows-headless-build
           path: dist\nothing-browser-headless-*-windows-x64.zip
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  #  MACOS
-  # ═══════════════════════════════════════════════════════════════════════════
   build-macos:
     name: Build macOS
     runs-on: macos-14
@@ -346,8 +337,10 @@ jobs:
           mkdir -p dist
 
           APP="build-mac/nothing-browser.app"
-          mkdir -p "${APP}/Contents/MacOS"
-          cp build-mac/nothing-browser "${APP}/Contents/MacOS/"
+
+          cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
+            "${APP}/Contents/MacOS/newpipe-bridge.jar"
+          cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
 
           cat > "${APP}/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -361,10 +354,6 @@ jobs:
             <key>NSHighResolutionCapable</key><true/>
           </dict></plist>
           EOF
-
-          cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
-            "${APP}/Contents/MacOS/newpipe-bridge.jar"
-          cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
 
           "$QT_BIN/macdeployqt" "$APP" -dmg -always-overwrite
           mv build-mac/nothing-browser.dmg \
@@ -390,9 +379,6 @@ jobs:
           name: macos-headless-build
           path: dist/nothing-browser-headless-*-macos.tar.gz
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  #  RELEASE
-  # ═══════════════════════════════════════════════════════════════════════════
   release:
     name: Publish Release
     needs: [build-linux, build-windows, build-macos]
@@ -438,16 +424,16 @@ jobs:
             ### Install — Nothing Browser (full UI)
 
             **Linux (deb)**
-            ```bash
+```bash
             sudo dpkg -i nothing-browser_*_amd64.deb
-            ```
+```
 
             **Linux (tar.gz)**
-            ```bash
+```bash
             tar -xzf nothing-browser-*-linux-x86_64.tar.gz
             cd nothing-browser-*-linux-x86_64
             ./nothing-browser
-            ```
+```
 
             **Windows:** Download `.zip` → extract → run `nothing-browser.exe` (JRE bundled)
 
@@ -460,15 +446,15 @@ jobs:
             Used by the `nothingbrowser` scraping lib. No UI.
 
             **Linux (deb)**
-            ```bash
+```bash
             sudo dpkg -i nothing-browser-headless_*_amd64.deb
-            ```
+```
 
             **Linux (tar.gz)**
-            ```bash
+```bash
             tar -xzf nothing-browser-headless-*-linux-x86_64.tar.gz
             ./nothing-browser-headless
-            ```
+```
 
             **Windows:** Download headless `.zip` → extract → run `nothing-browser-headless.exe`
 
