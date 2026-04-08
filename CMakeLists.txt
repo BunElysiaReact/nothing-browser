@@ -3,7 +3,6 @@ project(NothingBrowser)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
 find_package(OpenSSL REQUIRED)
@@ -15,6 +14,7 @@ set(SHARED_SOURCES
     core/engine/NetworkCapture.cpp
     core/engine/IdentityGenerator.cpp
     core/engine/IdentityStore.cpp
+    core/engine/Interceptor.cpp
     core/tabs/PiggyTab.cpp
 )
 
@@ -26,7 +26,6 @@ add_executable(nothing-browser
     core/tabs/DevToolsPanel.cpp
     core/tabs/YoutubeTab.cpp
     core/tabs/NewsTab.cpp
-    core/engine/Interceptor.cpp
     core/engine/UpdateChecker.cpp
     core/engine/PluginManager.cpp
     core/tabs/PluginsTab.cpp
