@@ -5,15 +5,14 @@
 #include <QJsonObject>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
+#include <QMap>
+#include <QUuid>
 
-// Forward declare — headful mode gets a real PiggyTab pointer
 class PiggyTab;
 
 class PiggyServer : public QObject {
     Q_OBJECT
 public:
-    // headful: pass piggy tab pointer
-    // headless: pass nullptr — server creates its own page
     explicit PiggyServer(PiggyTab *piggy, QObject *parent = nullptr);
     ~PiggyServer();
 
@@ -30,15 +29,23 @@ private:
     void respond(QLocalSocket *client, const QString &id,
                  bool ok, const QVariant &data = QVariant());
     void navigatePage(const QString &url, QLocalSocket *client,
-                      const QString &reqId);
-    QWebEnginePage* page();
+                      const QString &reqId, const QString &tabId);
 
-    PiggyTab         *m_piggy   = nullptr;  // null in headless
-    QLocalServer     *m_server  = nullptr;
-    QWebEnginePage   *m_ownPage = nullptr;  // headless only
-    QWebEngineProfile*m_ownProfile = nullptr;
+    QWebEnginePage* page(const QString &tabId = QString());
+    QString createTab();
+    void closeTab(const QString &tabId);
 
-    QList<QLocalSocket*> m_clients;
+    PiggyTab              *m_piggy      = nullptr;
+    QLocalServer          *m_server     = nullptr;
+
+    // headless-mode own profile + fallback page
+    QWebEngineProfile     *m_ownProfile = nullptr;
+    QWebEnginePage        *m_ownPage    = nullptr;
+
+    // headless multi-tab pool
+    QMap<QString, QWebEnginePage*> m_tabs;
+
+    QList<QLocalSocket*>   m_clients;
 
     static constexpr char SOCKET_NAME[] = "piggy";
 };
