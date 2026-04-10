@@ -53,7 +53,7 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
 
       - name: Build
-        run: cmake --build build --parallel --target nothing-browser nothing-browser-headless
+        run: cmake --build build --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
 
       - name: Copy JAR to build
         run: cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar build/newpipe-bridge.jar
@@ -146,6 +146,43 @@ jobs:
           tar -czf dist/nothing-browser-headless-${VERSION}-linux-x86_64.tar.gz \
             -C dist nothing-browser-headless-${VERSION}-linux-x86_64
 
+      - name: Package nothing-browser-headful .deb
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" == "main" || "$VERSION" == "master" || -z "$VERSION" ]] && VERSION="0.0.0"
+          PKG="dist/nothing-browser-headful_${VERSION}_amd64"
+          mkdir -p ${PKG}/DEBIAN \
+                   ${PKG}/usr/local/bin
+
+          cp build/nothing-browser-headful ${PKG}/usr/local/bin/
+
+          cat > ${PKG}/DEBIAN/control <<EOF
+          Package: nothing-browser-headful
+          Version: ${VERSION}
+          Architecture: amd64
+          Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
+          Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6
+          Description: Nothing Browser Headful — Script-controlled visible window for the nothingbrowser scraping lib.
+          EOF
+
+          cat > ${PKG}/DEBIAN/postinst <<'EOF'
+          #!/bin/sh
+          exit 0
+          EOF
+          chmod 755 ${PKG}/DEBIAN/postinst
+
+          dpkg-deb --build --root-owner-group ${PKG} \
+            dist/nothing-browser-headful_${VERSION}_amd64.deb
+
+      - name: Package nothing-browser-headful tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" == "main" || "$VERSION" == "master" || -z "$VERSION" ]] && VERSION="0.0.0"
+          mkdir -p dist/nothing-browser-headful-${VERSION}-linux-x86_64
+          cp build/nothing-browser-headful dist/nothing-browser-headful-${VERSION}-linux-x86_64/
+          tar -czf dist/nothing-browser-headful-${VERSION}-linux-x86_64.tar.gz \
+            -C dist nothing-browser-headful-${VERSION}-linux-x86_64
+
       - uses: actions/upload-artifact@v4
         with:
           name: linux-build
@@ -159,6 +196,13 @@ jobs:
           path: |
             dist/nothing-browser-headless_*.deb
             dist/nothing-browser-headless-*-linux-x86_64.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-headful-build
+          path: |
+            dist/nothing-browser-headful_*.deb
+            dist/nothing-browser-headful-*-linux-x86_64.tar.gz
 
   build-windows:
     name: Build Windows
@@ -217,7 +261,7 @@ jobs:
 
       - name: Build
         shell: cmd
-        run: cmake --build build-win --config Release --parallel --target nothing-browser nothing-browser-headless
+        run: cmake --build build-win --config Release --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
 
       - name: Package nothing-browser
         shell: powershell
@@ -272,6 +316,30 @@ jobs:
             -Path "$outDir\*" `
             -DestinationPath "dist\nothing-browser-headless-${version}-windows-x64.zip"
 
+      - name: Package nothing-browser-headful
+        shell: powershell
+        run: |
+          $version = "${{ github.ref_name }}" -replace "^v", ""
+          if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
+
+          $outDir = "dist\nothing-browser-headful-win64"
+          New-Item -ItemType Directory -Force $outDir
+
+          Copy-Item "build-win\Release\nothing-browser-headful.exe" "$outDir\"
+
+          $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
+                  Select-Object -First 1 -ExpandProperty FullName
+          & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headful.exe"
+
+          @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
+            $src = Join-Path $env:QT_ROOT $_
+            if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
+          }
+
+          Compress-Archive `
+            -Path "$outDir\*" `
+            -DestinationPath "dist\nothing-browser-headful-${version}-windows-x64.zip"
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build
@@ -281,6 +349,11 @@ jobs:
         with:
           name: windows-headless-build
           path: dist\nothing-browser-headless-*-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-headful-build
+          path: dist\nothing-browser-headful-*-windows-x64.zip
 
   build-macos:
     name: Build macOS
@@ -328,7 +401,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$QT_ROOT"
 
       - name: Build
-        run: cmake --build build-mac --parallel --target nothing-browser nothing-browser-headless
+        run: cmake --build build-mac --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
 
       - name: Package nothing-browser .dmg
         run: |
@@ -369,6 +442,16 @@ jobs:
           tar -czf dist/nothing-browser-headless-${VERSION}-macos.tar.gz \
             -C dist nothing-browser-headless-${VERSION}-macos
 
+      - name: Package nothing-browser-headful
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -z "$VERSION" ] && VERSION="dev"
+          mkdir -p dist/nothing-browser-headful-${VERSION}-macos
+          cp build-mac/nothing-browser-headful \
+            dist/nothing-browser-headful-${VERSION}-macos/
+          tar -czf dist/nothing-browser-headful-${VERSION}-macos.tar.gz \
+            -C dist nothing-browser-headful-${VERSION}-macos
+
       - uses: actions/upload-artifact@v4
         with:
           name: macos-build
@@ -378,6 +461,11 @@ jobs:
         with:
           name: macos-headless-build
           path: dist/nothing-browser-headless-*-macos.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-headful-build
+          path: dist/nothing-browser-headful-*-macos.tar.gz
 
   release:
     name: Publish Release
@@ -456,14 +544,37 @@ jobs:
 
             **macOS:** Download headless `.tar.gz` → extract → run `nothing-browser-headless`
 
+            ---
+
+            ### Install — Nothing Browser Headful (script-controlled visible window)
+
+            Used by the `nothingbrowser` scraping lib when a visible window is needed.
+
+            **Linux (deb)**
+
+                sudo dpkg -i nothing-browser-headful_*_amd64.deb
+
+            **Linux (tar.gz)**
+
+                tar -xzf nothing-browser-headful-*-linux-x86_64.tar.gz
+                ./nothing-browser-headful
+
+            **Windows:** Download headful `.zip` → extract → run `nothing-browser-headful.exe`
+
+            **macOS:** Download headful `.tar.gz` → extract → run `nothing-browser-headful`
+
           files: |
             release-artifacts/linux-build/*.deb
             release-artifacts/linux-build/*.tar.gz
             release-artifacts/linux-headless-build/*.deb
             release-artifacts/linux-headless-build/*.tar.gz
+            release-artifacts/linux-headful-build/*.deb
+            release-artifacts/linux-headful-build/*.tar.gz
             release-artifacts/windows-build/*.zip
             release-artifacts/windows-headless-build/*.zip
+            release-artifacts/windows-headful-build/*.zip
             release-artifacts/macos-build/*.dmg
             release-artifacts/macos-headless-build/*.tar.gz
+            release-artifacts/macos-headful-build/*.tar.gz
           draft: false
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
