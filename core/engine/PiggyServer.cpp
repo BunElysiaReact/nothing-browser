@@ -2,6 +2,7 @@
 #include "../tabs/PiggyTab.h"
 #include "NetworkCapture.h"
 #include "Interceptor.h"
+#include "FingerprintSpoofer.h"
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QLocalSocket>
@@ -10,11 +11,15 @@
 #include <QWebEngineSettings>
 #include <QWebEngineHistory>
 #include <QWebEngineCookieStore>
+#include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
 #include <QPageLayout>
 #include <QPageSize>
 #include <QMarginsF>
 #include <QTimer>
 #include <QRegularExpression>
+
+// ─── Constructors ─────────────────────────────────────────────────────────────
 
 PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     : QObject(parent), m_piggy(piggy)
@@ -22,10 +27,15 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     if (!m_piggy) {
         m_ownProfile = new QWebEngineProfile(this);
         m_ownProfile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
-        m_ownProfile->setPersistentCookiesPolicy(
-            QWebEngineProfile::NoPersistentCookies);
+        m_ownProfile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
         m_ownPage = new QWebEnginePage(m_ownProfile, this);
     }
+}
+
+PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
+    : QObject(parent), m_piggy(nullptr), m_headfulPage(page)
+{
+    // page is owned externally — do not reparent
 }
 
 PiggyServer::~PiggyServer() { stop(); }
@@ -34,18 +44,43 @@ PiggyServer::~PiggyServer() { stop(); }
 
 QString PiggyServer::createTab() {
     QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    QWebEngineProfile *profile = m_piggy ? m_piggy->getPage()->profile() : m_ownProfile;
-    QWebEnginePage *p = new QWebEnginePage(profile, this);
 
-    // Create interceptor and attach to profile
-    Interceptor *interceptor = new Interceptor(this);
+    // Decide which profile to use
+    QWebEngineProfile *profile = nullptr;
+    if (m_piggy)
+        profile = m_piggy->getPage()->profile();
+    else if (m_headfulPage)
+        profile = m_headfulPage->profile();
+    else
+        profile = m_ownProfile;
+
+    auto *p = new QWebEnginePage(profile, this);
+
+    // Inject fingerprint spoof
+    auto &spoofer = FingerprintSpoofer::instance();
+    QWebEngineScript spoofScript;
+    spoofScript.setName("nothing_fingerprint_" + id);
+    spoofScript.setSourceCode(spoofer.injectionScript());
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    spoofScript.setWorldId(QWebEngineScript::MainWorld);
+    spoofScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(spoofScript);
+
+    // Inject capture script
+    QWebEngineScript capScript;
+    capScript.setName("nothing_capture_" + id);
+    capScript.setSourceCode(NetworkCapture::captureScript());
+    capScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    capScript.setWorldId(QWebEngineScript::MainWorld);
+    capScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(capScript);
+
+    auto *interceptor = new Interceptor(this);
     profile->setUrlRequestInterceptor(interceptor);
 
-    // Create network capture and attach
-    NetworkCapture *capture = new NetworkCapture(this);
+    auto *capture = new NetworkCapture(this);
     capture->attachToPage(p, profile);
 
-    // Connect capture signals
     connect(capture, &NetworkCapture::requestCaptured, this,
             [this, id](const CapturedRequest &req) { onRequestCaptured(req, id); });
     connect(capture, &NetworkCapture::wsFrameCaptured, this,
@@ -53,20 +88,22 @@ QString PiggyServer::createTab() {
     connect(capture, &NetworkCapture::cookieCaptured, this,
             [this, id](const CapturedCookie &cookie) { onCookieCaptured(cookie, id); });
     connect(capture, &NetworkCapture::cookieRemoved, this,
-            [this, id](const QString &name, const QString &domain) { onCookieRemoved(name, domain, id); });
+            [this, id](const QString &name, const QString &domain) {
+                onCookieRemoved(name, domain, id);
+            });
     connect(capture, &NetworkCapture::storageCaptured, this,
-            [this, id](const QString &origin, const QString &key, const QString &value, const QString &type) {
+            [this, id](const QString &origin, const QString &key,
+                       const QString &value, const QString &type) {
                 onStorageCaptured(origin, key, value, type, id);
             });
 
     TabContext ctx;
-    ctx.page = p;
+    ctx.page        = p;
     ctx.interceptor = interceptor;
-    ctx.capture = capture;
-    ctx.imageBlocked = false;
-    ctx.captureActive = false;
+    ctx.capture     = capture;
     m_tabs.insert(id, ctx);
 
+    emit tabCreated(id, p);
     qDebug() << "[PiggyServer] Tab created:" << id;
     return id;
 }
@@ -78,6 +115,7 @@ void PiggyServer::closeTab(const QString &tabId) {
     ctx.interceptor->deleteLater();
     ctx.capture->deleteLater();
     m_tabs.remove(tabId);
+    emit tabClosed(tabId);
     qDebug() << "[PiggyServer] Tab closed:" << tabId;
 }
 
@@ -87,7 +125,9 @@ QWebEnginePage* PiggyServer::page(const QString &tabId) {
         if (it != m_tabs.end()) return it.value().page;
         qWarning() << "[PiggyServer] Unknown tabId:" << tabId << "— falling back to default";
     }
-    return m_piggy ? m_piggy->getPage() : m_ownPage;
+    if (m_piggy)       return m_piggy->getPage();
+    if (m_headfulPage) return m_headfulPage;
+    return m_ownPage;
 }
 
 // ─── Server lifecycle ────────────────────────────────────────────────────────
@@ -118,8 +158,10 @@ void PiggyServer::onNewConnection() {
     while (m_server->hasPendingConnections()) {
         auto *client = m_server->nextPendingConnection();
         m_clients.append(client);
-        connect(client, &QLocalSocket::readyRead, this, &PiggyServer::onClientData);
-        connect(client, &QLocalSocket::disconnected, this, &PiggyServer::onClientDisconnected);
+        connect(client, &QLocalSocket::readyRead,
+                this, &PiggyServer::onClientData);
+        connect(client, &QLocalSocket::disconnected,
+                this, &PiggyServer::onClientDisconnected);
         qDebug() << "[PiggyServer] Client connected";
     }
 }
@@ -141,25 +183,24 @@ void PiggyServer::onClientData() {
     handleCommand(doc.object(), client);
 }
 
-// ─── Screenshot / PDF helpers ─────────────────────────────────────────────────
+// ─── Screenshot / PDF ────────────────────────────────────────────────────────
 
-void PiggyServer::doScreenshot(QLocalSocket *client, const QString &id, const QString &tabId) {
+void PiggyServer::doScreenshot(QLocalSocket *client, const QString &id,
+                                const QString &tabId) {
     auto *p = page(tabId);
     const QString js = QStringLiteral(
         "(function(){"
         "  try {"
-        "    var w = Math.min(document.documentElement.scrollWidth  || 1280, 8192);"
-        "    var h = Math.min(document.documentElement.scrollHeight || 800, 16384);"
-        "    var c = document.createElement('canvas');"
-        "    c.width = w; c.height = h;"
-        "    var ctx = c.getContext('2d');"
-        "    ctx.fillStyle = '#ffffff';"
-        "    ctx.fillRect(0, 0, w, h);"
-        "    ctx.fillStyle = '#000000';"
-        "    ctx.font = '16px sans-serif';"
-        "    ctx.fillText('screenshot: ' + document.title, 20, 40);"
+        "    var w=Math.min(document.documentElement.scrollWidth||1280,8192);"
+        "    var h=Math.min(document.documentElement.scrollHeight||800,16384);"
+        "    var c=document.createElement('canvas');"
+        "    c.width=w; c.height=h;"
+        "    var ctx=c.getContext('2d');"
+        "    ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h);"
+        "    ctx.fillStyle='#000000'; ctx.font='16px sans-serif';"
+        "    ctx.fillText('screenshot: '+document.title,20,40);"
         "    return c.toDataURL('image/png').split(',')[1];"
-        "  } catch(e) { return null; }"
+        "  } catch(e){ return null; }"
         "})()"
     );
     p->runJavaScript(js, [=](const QVariant &r) {
@@ -170,11 +211,12 @@ void PiggyServer::doScreenshot(QLocalSocket *client, const QString &id, const QS
     });
 }
 
-void PiggyServer::doPdf(QLocalSocket *client, const QString &id, const QString &tabId) {
+void PiggyServer::doPdf(QLocalSocket *client, const QString &id,
+                         const QString &tabId) {
     auto *p = page(tabId);
     QPageLayout layout(QPageSize(QPageSize::A4),
                        QPageLayout::Portrait,
-                       QMarginsF(15, 15, 15, 15),
+                       QMarginsF(15,15,15,15),
                        QPageLayout::Millimeter);
     p->printToPdf([=](const QByteArray &pdfData) {
         if (pdfData.isEmpty()) {
@@ -195,20 +237,16 @@ void PiggyServer::setImageBlocking(const QString &tabId, bool block) {
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
 
 QList<QNetworkCookie> PiggyServer::cookiesForTab(const QString &tabId) {
-    QWebEngineProfile *profile = page(tabId)->profile();
-    // Qt doesn't provide a synchronous way to list all cookies; we'd need async.
-    // For simplicity, we return empty list; actual cookie management uses async store.
+    Q_UNUSED(tabId);
     return {};
 }
 
 // ─── Interception rules ──────────────────────────────────────────────────────
 
-void PiggyServer::applyInterceptRules(Interceptor *interceptor, const QVector<InterceptRule> &rules) {
-    // In a real implementation, Interceptor would hold rules and evaluate them.
-    // For simplicity, we'll store rules in TabContext and let Interceptor access them.
-    // This requires Interceptor to have a pointer to its owning TabContext.
+void PiggyServer::applyInterceptRules(Interceptor *interceptor,
+                                       const QVector<InterceptRule> &rules) {
     Q_UNUSED(interceptor);
-    // Placeholder – actual implementation would set rules on the interceptor.
+    Q_UNUSED(rules);
 }
 
 // ─── Network capture control ─────────────────────────────────────────────────
@@ -217,7 +255,6 @@ void PiggyServer::startCapture(const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
     TabContext &ctx = m_tabs[tabId];
     if (!ctx.captureActive) {
-        // Inject capture script
         ctx.page->runJavaScript(NetworkCapture::captureScript());
         ctx.captureActive = true;
         qDebug() << "[PiggyServer] Capture started for tab" << tabId;
@@ -226,9 +263,7 @@ void PiggyServer::startCapture(const QString &tabId) {
 
 void PiggyServer::stopCapture(const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    TabContext &ctx = m_tabs[tabId];
-    ctx.captureActive = false;
-    // No way to uninject script, but we can stop processing messages.
+    m_tabs[tabId].captureActive = false;
 }
 
 bool PiggyServer::isCapturing(const QString &tabId) const {
@@ -239,36 +274,32 @@ bool PiggyServer::isCapturing(const QString &tabId) const {
 
 void PiggyServer::onRequestCaptured(const CapturedRequest &req, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    TabContext &ctx = m_tabs[tabId];
-    if (ctx.captureActive)
-        ctx.capturedRequests.append(req);
-    // Optionally forward to connected clients via a dedicated notification.
+    if (m_tabs[tabId].captureActive)
+        m_tabs[tabId].capturedRequests.append(req);
 }
 
 void PiggyServer::onWsFrameCaptured(const WebSocketFrame &frame, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    TabContext &ctx = m_tabs[tabId];
-    if (ctx.captureActive)
-        ctx.capturedWsFrames.append(frame);
+    if (m_tabs[tabId].captureActive)
+        m_tabs[tabId].capturedWsFrames.append(frame);
 }
 
 void PiggyServer::onCookieCaptured(const CapturedCookie &cookie, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    TabContext &ctx = m_tabs[tabId];
-    ctx.capturedCookies.append(cookie);
+    m_tabs[tabId].capturedCookies.append(cookie);
 }
 
-void PiggyServer::onCookieRemoved(const QString &name, const QString &domain, const QString &tabId) {
+void PiggyServer::onCookieRemoved(const QString &name, const QString &domain,
+                                   const QString &tabId) {
     Q_UNUSED(name); Q_UNUSED(domain); Q_UNUSED(tabId);
-    // Could mark cookie as removed.
 }
 
 void PiggyServer::onStorageCaptured(const QString &origin, const QString &key,
-                                    const QString &value, const QString &storageType, const QString &tabId) {
+                                     const QString &value, const QString &storageType,
+                                     const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    TabContext &ctx = m_tabs[tabId];
-    if (ctx.captureActive)
-        ctx.storageEntries.append({storageType + ":" + origin + ":" + key, value});
+    if (m_tabs[tabId].captureActive)
+        m_tabs[tabId].storageEntries.append({storageType+":"+origin+":"+key, value});
 }
 
 // ─── Command router ──────────────────────────────────────────────────────────
@@ -281,10 +312,6 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
 
     // ── tab.new ───────────────────────────────────────────────────────────────
     if (c == "tab.new") {
-        if (m_piggy) {
-            respond(client, id, false, "tab.new not supported in headful mode");
-            return;
-        }
         respond(client, id, true, createTab());
         return;
     }
@@ -316,7 +343,7 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
     if (c == "reload") {
         auto *p = page(tabId);
         connect(p, &QWebEnginePage::loadFinished, this,
-            [=](bool ok) { respond(client, id, ok, ok ? "reloaded" : "reload failed"); },
+            [=](bool ok){ respond(client, id, ok, ok?"reloaded":"reload failed"); },
             Qt::SingleShotConnection);
         p->triggerAction(QWebEnginePage::Reload);
         return;
@@ -326,11 +353,10 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
     if (c == "go.back") {
         auto *p = page(tabId);
         if (!p->history()->canGoBack()) {
-            respond(client, id, false, "no history to go back");
-            return;
+            respond(client, id, false, "no history to go back"); return;
         }
         connect(p, &QWebEnginePage::loadFinished, this,
-            [=](bool ok) { respond(client, id, ok, ok ? "back" : "back failed"); },
+            [=](bool ok){ respond(client, id, ok, ok?"back":"back failed"); },
             Qt::SingleShotConnection);
         p->triggerAction(QWebEnginePage::Back);
         return;
@@ -338,11 +364,10 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
     if (c == "go.forward") {
         auto *p = page(tabId);
         if (!p->history()->canGoForward()) {
-            respond(client, id, false, "no history to go forward");
-            return;
+            respond(client, id, false, "no history to go forward"); return;
         }
         connect(p, &QWebEnginePage::loadFinished, this,
-            [=](bool ok) { respond(client, id, ok, ok ? "forward" : "forward failed"); },
+            [=](bool ok){ respond(client, id, ok, ok?"forward":"forward failed"); },
             Qt::SingleShotConnection);
         p->triggerAction(QWebEnginePage::Forward);
         return;
@@ -350,47 +375,31 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
 
     // ── page.url / page.title / page.content ─────────────────────────────────
     if (c == "page.url") {
-        respond(client, id, true, page(tabId)->url().toString());
-        return;
+        respond(client, id, true, page(tabId)->url().toString()); return;
     }
     if (c == "page.title") {
-        respond(client, id, true, page(tabId)->title());
-        return;
+        respond(client, id, true, page(tabId)->title()); return;
     }
     if (c == "page.content") {
-        page(tabId)->toHtml([=](const QString &html) {
+        page(tabId)->toHtml([=](const QString &html){
             respond(client, id, true, html);
         });
         return;
     }
 
     // ── screenshot / pdf ─────────────────────────────────────────────────────
-    if (c == "screenshot") {
-        doScreenshot(client, id, tabId);
-        return;
-    }
-    if (c == "pdf") {
-        doPdf(client, id, tabId);
-        return;
-    }
+    if (c == "screenshot") { doScreenshot(client, id, tabId); return; }
+    if (c == "pdf")        { doPdf(client, id, tabId);        return; }
 
     // ── image blocking ───────────────────────────────────────────────────────
-    if (c == "intercept.block.images") {
-        setImageBlocking(tabId, true);
-        respond(client, id, true, "images blocked");
-        return;
-    }
-    if (c == "intercept.unblock.images") {
-        setImageBlocking(tabId, false);
-        respond(client, id, true, "images unblocked");
-        return;
-    }
+    if (c == "intercept.block.images")   { setImageBlocking(tabId, true);  respond(client,id,true,"images blocked");   return; }
+    if (c == "intercept.unblock.images") { setImageBlocking(tabId, false); respond(client,id,true,"images unblocked"); return; }
 
     // ── wait commands ────────────────────────────────────────────────────────
     if (c == "wait.navigation") {
         auto *p = page(tabId);
         connect(p, &QWebEnginePage::loadFinished, this,
-            [=](bool ok) { respond(client, id, ok, ok ? "navigated" : "navigation failed"); },
+            [=](bool ok){ respond(client, id, ok, ok?"navigated":"navigation failed"); },
             Qt::SingleShotConnection);
         return;
     }
@@ -404,19 +413,13 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
         timer->setInterval(100);
         connect(timer, &QTimer::timeout, this, [=]() mutable {
             state->elapsed += 100;
-            QString js = QString(
-                "(function(){ return !!document.querySelector('%1'); })()"
-            ).arg(selector);
+            QString js = QString("(function(){ return !!document.querySelector('%1'); })()").arg(selector);
             p->runJavaScript(js, [=](const QVariant &found) {
                 if (found.toBool()) {
-                    timer->stop();
-                    timer->deleteLater();
-                    delete state;
+                    timer->stop(); timer->deleteLater(); delete state;
                     respond(client, id, true, "found");
                 } else if (state->elapsed >= timeout) {
-                    timer->stop();
-                    timer->deleteLater();
-                    delete state;
+                    timer->stop(); timer->deleteLater(); delete state;
                     respond(client, id, false, "timeout waiting for selector: " + selector);
                 }
             });
@@ -425,209 +428,201 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
         return;
     }
     if (c == "wait.response") {
-        QTimer::singleShot(0, this, [=]() {
-            respond(client, id, true, "response ready");
-        });
+        QTimer::singleShot(0, this, [=](){ respond(client, id, true, "response ready"); });
         return;
     }
 
-    // ── search / fetch commands ──────────────────────────────────────────────
+    // ── search / fetch ───────────────────────────────────────────────────────
     if (c == "search.css") {
         page(tabId)->runJavaScript(PiggyTab::domExtractorJS(),
-            [=](const QVariant &result) { respond(client, id, true, result); });
+            [=](const QVariant &r){ respond(client, id, true, r); });
         return;
     }
     if (c == "search.id") {
         QString js = QString(
-            "(function(){ var el = document.getElementById('%1');"
+            "(function(){ var el=document.getElementById('%1');"
             "if(!el) return null;"
-            "return { tag: el.tagName.toLowerCase(), id: el.id, cls: el.className,"
-            "  text: el.innerText.slice(0,200), html: el.innerHTML.slice(0,500) }; })()"
+            "return {tag:el.tagName.toLowerCase(),id:el.id,cls:el.className,"
+            "text:el.innerText.slice(0,200),html:el.innerHTML.slice(0,500)}; })()"
         ).arg(payload["query"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "fetch.text") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
-            "return el ? el.innerText.trim() : null; })()"
+            "(function(){ var el=document.querySelector('%1');"
+            "return el?el.innerText.trim():null; })()"
         ).arg(payload["query"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "fetch.links") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return [];"
-            "return Array.from(el.querySelectorAll('a')).map(a => a.href).filter(Boolean); })()"
+            "return Array.from(el.querySelectorAll('a')).map(a=>a.href).filter(Boolean); })()"
         ).arg(payload["query"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "fetch.links.all") {
-        QString js =
+        page(tabId)->runJavaScript(
             "(function(){ return Array.from(document.querySelectorAll('a'))"
-            ".map(a => a.href).filter(Boolean); })()";
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+            ".map(a=>a.href).filter(Boolean); })()",
+            [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "fetch.image") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return [];"
-            "return Array.from(el.querySelectorAll('img')).map(i => i.src).filter(Boolean); })()"
+            "return Array.from(el.querySelectorAll('img')).map(i=>i.src).filter(Boolean); })()"
         ).arg(payload["query"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
 
-    // ── interaction commands ─────────────────────────────────────────────────
+    // ── interactions ─────────────────────────────────────────────────────────
     if (c == "click") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
-            "if(el){ el.click(); return true; } return false; })()"
+            "(function(){ var el=document.querySelector('%1');"
+            "if(el){el.click();return true;} return false; })()"
         ).arg(payload["selector"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "dblclick") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));"
             "return true; })()"
         ).arg(payload["selector"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "hover") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));"
             "el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));"
             "return true; })()"
         ).arg(payload["selector"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "type") {
         QString text = payload["text"].toString();
-        text.replace("\\", "\\\\").replace("'", "\\'");
+        text.replace("\\","\\\\").replace("'","\\'");
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
-            "el.focus(); el.value = '%2';"
+            "el.focus(); el.value='%2';"
             "el.dispatchEvent(new Event('input',{bubbles:true}));"
             "el.dispatchEvent(new Event('change',{bubbles:true}));"
             "return true; })()"
         ).arg(payload["selector"].toString(), text);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "select") {
         QString val = payload["value"].toString();
-        val.replace("\\", "\\\\").replace("'", "\\'");
+        val.replace("\\","\\\\").replace("'","\\'");
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
-            "el.value = '%2';"
+            "el.value='%2';"
             "el.dispatchEvent(new Event('change',{bubbles:true}));"
             "return true; })()"
         ).arg(payload["selector"].toString(), val);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "scroll.to") {
         QString js = QString(
-            "(function(){ var el = document.querySelector('%1');"
+            "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.scrollIntoView({behavior:'smooth',block:'center'});"
             "return true; })()"
         ).arg(payload["selector"].toString());
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "scroll.by") {
         int px = payload["px"].toInt(300);
-        QString js = QString("window.scrollBy({top:%1,behavior:'smooth'}); true;").arg(px);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(
+            QString("window.scrollBy({top:%1,behavior:'smooth'}); true;").arg(px),
+            [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "keyboard.press") {
         QString key = payload["key"].toString();
-        key.replace("'", "\\'");
+        key.replace("'","\\'");
         QString js = QString(
             "(function(){"
-            "var el = document.activeElement || document.body;"
+            "var el=document.activeElement||document.body;"
             "['keydown','keypress','keyup'].forEach(function(t){"
             "  el.dispatchEvent(new KeyboardEvent(t,{key:'%1',bubbles:true,cancelable:true}));"
             "});"
             "return true; })()"
         ).arg(key);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "keyboard.combo") {
         QString combo = payload["combo"].toString();
         QStringList parts = combo.split('+');
-        QString mainKey = parts.last();
-        mainKey.replace("'", "\\'");
+        QString mainKey = parts.last(); mainKey.replace("'","\\'");
         bool ctrl  = parts.contains("Control", Qt::CaseInsensitive);
         bool shift = parts.contains("Shift",   Qt::CaseInsensitive);
         bool alt   = parts.contains("Alt",     Qt::CaseInsensitive);
         QString js = QString(
             "(function(){"
-            "var el = document.activeElement || document.body;"
+            "var el=document.activeElement||document.body;"
             "var opts={key:'%1',ctrlKey:%2,shiftKey:%3,altKey:%4,bubbles:true,cancelable:true};"
             "['keydown','keypress','keyup'].forEach(function(t){"
             "  el.dispatchEvent(new KeyboardEvent(t,opts));"
             "});"
             "return true; })()"
         ).arg(mainKey,
-              ctrl  ? "true" : "false",
-              shift ? "true" : "false",
-              alt   ? "true" : "false");
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+              ctrl  ? "true":"false",
+              shift ? "true":"false",
+              alt   ? "true":"false");
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "mouse.move") {
-        int x = payload["x"].toInt();
-        int y = payload["y"].toInt();
-        QString js = QString(
-            "document.dispatchEvent(new MouseEvent('mousemove',{clientX:%1,clientY:%2,bubbles:true}));"
-            "true;"
-        ).arg(x).arg(y);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        int x = payload["x"].toInt(), y = payload["y"].toInt();
+        page(tabId)->runJavaScript(
+            QString("document.dispatchEvent(new MouseEvent('mousemove',{clientX:%1,clientY:%2,bubbles:true})); true;")
+                .arg(x).arg(y),
+            [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "mouse.drag") {
-        QJsonObject from = payload["from"].toObject();
-        QJsonObject to   = payload["to"].toObject();
-        int fx = from["x"].toInt(), fy = from["y"].toInt();
-        int tx = to["x"].toInt(),   ty = to["y"].toInt();
+        QJsonObject from = payload["from"].toObject(), to = payload["to"].toObject();
+        int fx=from["x"].toInt(), fy=from["y"].toInt();
+        int tx=to["x"].toInt(),   ty=to["y"].toInt();
         QString js = QString(
             "(function(){"
-            "var el = document.elementFromPoint(%1,%2);"
+            "var el=document.elementFromPoint(%1,%2);"
             "if(!el) return false;"
             "el.dispatchEvent(new MouseEvent('mousedown',{clientX:%1,clientY:%2,bubbles:true}));"
             "document.dispatchEvent(new MouseEvent('mousemove',{clientX:%3,clientY:%4,bubbles:true}));"
             "document.dispatchEvent(new MouseEvent('mouseup',  {clientX:%3,clientY:%4,bubbles:true}));"
             "return true; })()"
         ).arg(fx).arg(fy).arg(tx).arg(ty);
-        page(tabId)->runJavaScript(js, [=](const QVariant &r) { respond(client, id, true, r); });
+        page(tabId)->runJavaScript(js, [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
     if (c == "evaluate") {
-        page(tabId)->runJavaScript(payload["js"].toString(), [=](const QVariant &r) {
-            respond(client, id, true, r);
-        });
+        page(tabId)->runJavaScript(payload["js"].toString(),
+            [=](const QVariant &r){ respond(client,id,true,r); });
         return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // NEW: Cookie commands
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ── cookie commands ───────────────────────────────────────────────────────
     if (c == "cookie.set") {
         QString name   = payload["name"].toString();
         QString value  = payload["value"].toString();
@@ -636,313 +631,189 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
         bool httpOnly  = payload["httpOnly"].toBool(false);
         bool secure    = payload["secure"].toBool(false);
         qint64 expiry  = payload["expiry"].toVariant().toLongLong();
-
         if (name.isEmpty() || domain.isEmpty()) {
-            respond(client, id, false, "cookie.set requires name and domain");
-            return;
+            respond(client, id, false, "cookie.set requires name and domain"); return;
         }
-
         QNetworkCookie cookie;
-        cookie.setName(name.toUtf8());
-        cookie.setValue(value.toUtf8());
-        cookie.setDomain(domain);
-        cookie.setPath(path);
-        cookie.setHttpOnly(httpOnly);
-        cookie.setSecure(secure);
-        if (expiry > 0)
-            cookie.setExpirationDate(QDateTime::fromSecsSinceEpoch(expiry));
-
-        auto *profile = page(tabId)->profile();
-        profile->cookieStore()->setCookie(cookie, QUrl("https://" + domain));
+        cookie.setName(name.toUtf8()); cookie.setValue(value.toUtf8());
+        cookie.setDomain(domain); cookie.setPath(path);
+        cookie.setHttpOnly(httpOnly); cookie.setSecure(secure);
+        if (expiry > 0) cookie.setExpirationDate(QDateTime::fromSecsSinceEpoch(expiry));
+        page(tabId)->profile()->cookieStore()->setCookie(cookie, QUrl("https://"+domain));
         respond(client, id, true, "cookie set");
         return;
     }
-
     if (c == "cookie.get") {
-        QString name   = payload["name"].toString();
-        QString domain = payload["domain"].toString();
-        // Qt cookie store is async; we'll need to query and respond asynchronously.
-        // For simplicity, we respond with a placeholder.
-        respond(client, id, false, "cookie.get not implemented (async)");
-        return;
+        respond(client, id, false, "cookie.get not implemented (async)"); return;
     }
-
     if (c == "cookie.delete") {
-        QString name   = payload["name"].toString();
-        QString domain = payload["domain"].toString();
-        if (name.isEmpty() || domain.isEmpty()) {
-            respond(client, id, false, "cookie.delete requires name and domain");
-            return;
+        QString name=payload["name"].toString(), domain=payload["domain"].toString();
+        if (name.isEmpty()||domain.isEmpty()) {
+            respond(client,id,false,"cookie.delete requires name and domain"); return;
         }
-        auto *profile = page(tabId)->profile();
-        // We need to fetch cookie first, then delete; Qt's API is deleteCookie(name, origin)
-        // For simplicity, we can construct a dummy cookie with same name/domain and call deleteCookie.
-        QNetworkCookie cookie;
-        cookie.setName(name.toUtf8());
-        cookie.setDomain(domain);
-        profile->cookieStore()->deleteCookie(cookie, QUrl("https://" + domain));
+        QNetworkCookie cookie; cookie.setName(name.toUtf8()); cookie.setDomain(domain);
+        page(tabId)->profile()->cookieStore()->deleteCookie(cookie, QUrl("https://"+domain));
         respond(client, id, true, "cookie deleted");
         return;
     }
-
     if (c == "cookie.list") {
-        // Async – not implemented fully; would require callback.
-        respond(client, id, false, "cookie.list not implemented");
-        return;
+        respond(client, id, false, "cookie.list not implemented"); return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Interception rules (request‑side)
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ── intercept rules ───────────────────────────────────────────────────────
     if (c == "intercept.rule.add") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         InterceptRule rule;
         rule.urlPattern = payload["pattern"].toString();
-        rule.block = payload["block"].toBool(false);
-        rule.redirectUrl = payload["redirect"].toString();
-        QJsonObject headersObj = payload["setHeaders"].toObject();
-        for (auto it = headersObj.begin(); it != headersObj.end(); ++it)
+        rule.block      = payload["block"].toBool(false);
+        rule.redirectUrl= payload["redirect"].toString();
+        QJsonObject hdrs= payload["setHeaders"].toObject();
+        for (auto it=hdrs.begin(); it!=hdrs.end(); ++it)
             rule.setHeaders[it.key()] = it.value().toString();
-        QJsonArray removeArr = payload["removeHeaders"].toArray();
-        for (auto v : removeArr)
-            rule.removeHeaders[v.toString()] = "";
-
+        QJsonArray rem  = payload["removeHeaders"].toArray();
+        for (auto v : rem) rule.removeHeaders[v.toString()] = "";
         m_tabs[tabId].rules.append(rule);
         applyInterceptRules(m_tabs[tabId].interceptor, m_tabs[tabId].rules);
         respond(client, id, true, "rule added");
         return;
     }
-
     if (c == "intercept.rule.clear") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         m_tabs[tabId].rules.clear();
         applyInterceptRules(m_tabs[tabId].interceptor, {});
         respond(client, id, true, "rules cleared");
         return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Network capture commands
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ── capture commands ──────────────────────────────────────────────────────
     if (c == "capture.start") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
-        startCapture(tabId);
-        respond(client, id, true, "capture started");
-        return;
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
+        startCapture(tabId); respond(client,id,true,"capture started"); return;
     }
-
     if (c == "capture.stop") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
-        stopCapture(tabId);
-        respond(client, id, true, "capture stopped");
-        return;
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
+        stopCapture(tabId); respond(client,id,true,"capture stopped"); return;
     }
-
     if (c == "capture.requests") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         QJsonArray arr;
         for (const auto &req : m_tabs[tabId].capturedRequests) {
-            QJsonObject obj;
-            obj["method"] = req.method;
-            obj["url"] = req.url;
-            obj["status"] = req.status;
-            obj["type"] = req.type;
-            obj["mime"] = req.mimeType;
-            obj["reqHeaders"] = req.requestHeaders;
-            obj["reqBody"] = req.requestBody;
-            obj["resHeaders"] = req.responseHeaders;
-            obj["resBody"] = req.responseBody;
-            obj["size"] = req.size;
-            obj["timestamp"] = req.timestamp;
-            arr.append(obj);
+            QJsonObject o;
+            o["method"]=req.method; o["url"]=req.url; o["status"]=req.status;
+            o["type"]=req.type; o["mime"]=req.mimeType;
+            o["reqHeaders"]=req.requestHeaders; o["reqBody"]=req.requestBody;
+            o["resHeaders"]=req.responseHeaders; o["resBody"]=req.responseBody;
+            o["size"]=req.size; o["timestamp"]=req.timestamp;
+            arr.append(o);
         }
-        respond(client, id, true, arr);
-        return;
+        respond(client, id, true, arr); return;
     }
-
     if (c == "capture.ws") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         QJsonArray arr;
         for (const auto &f : m_tabs[tabId].capturedWsFrames) {
-            QJsonObject obj;
-            obj["connectionId"] = f.connectionId;
-            obj["url"] = f.url;
-            obj["direction"] = f.direction;
-            obj["data"] = f.data;
-            obj["binary"] = f.isBinary;
-            obj["timestamp"] = f.timestamp;
-            arr.append(obj);
+            QJsonObject o;
+            o["connectionId"]=f.connectionId; o["url"]=f.url;
+            o["direction"]=f.direction; o["data"]=f.data;
+            o["binary"]=f.isBinary; o["timestamp"]=f.timestamp;
+            arr.append(o);
         }
-        respond(client, id, true, arr);
-        return;
+        respond(client, id, true, arr); return;
     }
-
     if (c == "capture.cookies") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         QJsonArray arr;
-        for (const auto &c : m_tabs[tabId].capturedCookies) {
-            QJsonObject obj;
-            obj["name"] = c.name;
-            obj["value"] = c.value;
-            obj["domain"] = c.domain;
-            obj["path"] = c.path;
-            obj["httpOnly"] = c.httpOnly;
-            obj["secure"] = c.secure;
-            obj["expires"] = c.expires;
-            arr.append(obj);
+        for (const auto &ck : m_tabs[tabId].capturedCookies) {
+            QJsonObject o;
+            o["name"]=ck.name; o["value"]=ck.value; o["domain"]=ck.domain;
+            o["path"]=ck.path; o["httpOnly"]=ck.httpOnly;
+            o["secure"]=ck.secure; o["expires"]=ck.expires;
+            arr.append(o);
         }
-        respond(client, id, true, arr);
-        return;
+        respond(client, id, true, arr); return;
     }
-
     if (c == "capture.storage") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         QJsonArray arr;
         for (const auto &p : m_tabs[tabId].storageEntries) {
-            QJsonObject obj;
-            obj["key"] = p.first;
-            obj["value"] = p.second;
-            arr.append(obj);
+            QJsonObject o; o["key"]=p.first; o["value"]=p.second;
+            arr.append(o);
         }
-        respond(client, id, true, arr);
-        return;
+        respond(client, id, true, arr); return;
     }
-
     if (c == "capture.clear") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         m_tabs[tabId].capturedRequests.clear();
         m_tabs[tabId].capturedWsFrames.clear();
         m_tabs[tabId].capturedCookies.clear();
         m_tabs[tabId].storageEntries.clear();
-        respond(client, id, true, "capture cleared");
-        return;
+        respond(client, id, true, "capture cleared"); return;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Session export/import
-    // ═══════════════════════════════════════════════════════════════════════════
+    // ── session export / import ───────────────────────────────────────────────
     if (c == "session.export") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
         QJsonObject root;
         root["url"] = page(tabId)->url().toString();
         QJsonArray reqArr;
         for (const auto &r : m_tabs[tabId].capturedRequests) {
             QJsonObject o;
-            o["method"] = r.method;
-            o["url"] = r.url;
-            o["status"] = r.status;
-            o["type"] = r.type;
-            o["mime"] = r.mimeType;
-            o["reqHeaders"] = r.requestHeaders;
-            o["reqBody"] = r.requestBody;
-            o["resHeaders"] = r.responseHeaders;
-            o["resBody"] = r.responseBody;
+            o["method"]=r.method; o["url"]=r.url; o["status"]=r.status;
+            o["type"]=r.type; o["mime"]=r.mimeType;
+            o["reqHeaders"]=r.requestHeaders; o["reqBody"]=r.requestBody;
+            o["resHeaders"]=r.responseHeaders; o["resBody"]=r.responseBody;
             reqArr.append(o);
         }
         root["requests"] = reqArr;
         QJsonArray wsArr;
         for (const auto &f : m_tabs[tabId].capturedWsFrames) {
             QJsonObject o;
-            o["url"] = f.url;
-            o["direction"] = f.direction;
-            o["data"] = f.data;
-            o["binary"] = f.isBinary;
+            o["url"]=f.url; o["direction"]=f.direction;
+            o["data"]=f.data; o["binary"]=f.isBinary;
             wsArr.append(o);
         }
         root["ws"] = wsArr;
-        QJsonArray cookieArr;
-        for (const auto &c : m_tabs[tabId].capturedCookies) {
+        QJsonArray ckArr;
+        for (const auto &ck : m_tabs[tabId].capturedCookies) {
             QJsonObject o;
-            o["name"] = c.name;
-            o["value"] = c.value;
-            o["domain"] = c.domain;
-            cookieArr.append(o);
+            o["name"]=ck.name; o["value"]=ck.value; o["domain"]=ck.domain;
+            ckArr.append(o);
         }
-        root["cookies"] = cookieArr;
-
-        QJsonDocument doc(root);
-        respond(client, id, true, QString::fromUtf8(doc.toJson(QJsonDocument::Compact)));
+        root["cookies"] = ckArr;
+        respond(client, id, true,
+                QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
         return;
     }
-
     if (c == "session.import") {
-        if (!m_tabs.contains(tabId)) {
-            respond(client, id, false, "invalid tabId");
-            return;
-        }
-        QByteArray data = payload["data"].toString().toUtf8();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (!doc.isObject()) {
-            respond(client, id, false, "invalid JSON data");
-            return;
-        }
+        if (!m_tabs.contains(tabId)) { respond(client,id,false,"invalid tabId"); return; }
+        QJsonDocument doc = QJsonDocument::fromJson(payload["data"].toString().toUtf8());
+        if (!doc.isObject()) { respond(client,id,false,"invalid JSON data"); return; }
         QJsonObject root = doc.object();
-        // Optional: set URL?
-        // For now, just restore captures into the tab context.
-        TabContext &ctx = m_tabs[tabId];
+        TabContext &ctx  = m_tabs[tabId];
         for (auto v : root["requests"].toArray()) {
-            CapturedRequest req;
-            QJsonObject o = v.toObject();
-            req.method = o["method"].toString();
-            req.url = o["url"].toString();
-            req.status = o["status"].toString();
-            req.type = o["type"].toString();
-            req.mimeType = o["mime"].toString();
-            req.requestHeaders = o["reqHeaders"].toString();
-            req.requestBody = o["reqBody"].toString();
-            req.responseHeaders = o["resHeaders"].toString();
-            req.responseBody = o["resBody"].toString();
+            CapturedRequest req; QJsonObject o=v.toObject();
+            req.method=o["method"].toString(); req.url=o["url"].toString();
+            req.status=o["status"].toString(); req.type=o["type"].toString();
+            req.mimeType=o["mime"].toString();
+            req.requestHeaders=o["reqHeaders"].toString();
+            req.requestBody=o["reqBody"].toString();
+            req.responseHeaders=o["resHeaders"].toString();
+            req.responseBody=o["resBody"].toString();
             ctx.capturedRequests.append(req);
         }
         for (auto v : root["ws"].toArray()) {
-            WebSocketFrame f;
-            QJsonObject o = v.toObject();
-            f.url = o["url"].toString();
-            f.direction = o["direction"].toString();
-            f.data = o["data"].toString();
-            f.isBinary = o["binary"].toBool();
+            WebSocketFrame f; QJsonObject o=v.toObject();
+            f.url=o["url"].toString(); f.direction=o["direction"].toString();
+            f.data=o["data"].toString(); f.isBinary=o["binary"].toBool();
             ctx.capturedWsFrames.append(f);
         }
         for (auto v : root["cookies"].toArray()) {
-            CapturedCookie c;
-            QJsonObject o = v.toObject();
-            c.name = o["name"].toString();
-            c.value = o["value"].toString();
-            c.domain = o["domain"].toString();
-            ctx.capturedCookies.append(c);
+            CapturedCookie ck; QJsonObject o=v.toObject();
+            ck.name=o["name"].toString(); ck.value=o["value"].toString();
+            ck.domain=o["domain"].toString();
+            ctx.capturedCookies.append(ck);
         }
-        respond(client, id, true, "session imported");
-        return;
+        respond(client, id, true, "session imported"); return;
     }
 
     respond(client, id, false, "unknown command: " + c);
@@ -951,10 +822,10 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
 // ─── Navigate ────────────────────────────────────────────────────────────────
 
 void PiggyServer::navigatePage(const QString &url, QLocalSocket *client,
-                               const QString &reqId, const QString &tabId) {
+                                const QString &reqId, const QString &tabId) {
     auto *p = page(tabId);
     connect(p, &QWebEnginePage::loadFinished, this,
-        [=](bool ok) { respond(client, reqId, ok, ok ? "loaded" : "load failed"); },
+        [=](bool ok){ respond(client, reqId, ok, ok?"loaded":"load failed"); },
         Qt::SingleShotConnection);
     p->load(QUrl(url));
 }
@@ -962,7 +833,7 @@ void PiggyServer::navigatePage(const QString &url, QLocalSocket *client,
 // ─── Respond ─────────────────────────────────────────────────────────────────
 
 void PiggyServer::respond(QLocalSocket *client, const QString &id,
-                          bool ok, const QVariant &data) {
+                           bool ok, const QVariant &data) {
     if (!client || client->state() != QLocalSocket::ConnectedState) return;
     QJsonObject res;
     res["id"] = id;
@@ -975,13 +846,9 @@ void PiggyServer::respond(QLocalSocket *client, const QString &id,
         res["data"] = data.value<QJsonObject>();
     } else {
         QJsonDocument d = QJsonDocument::fromVariant(data);
-        if (d.isNull()) {
-            res["data"] = data.toString();
-        } else if (d.isArray()) {
-            res["data"] = d.array();
-        } else {
-            res["data"] = d.object();
-        }
+        if (d.isNull())        res["data"] = data.toString();
+        else if (d.isArray())  res["data"] = d.array();
+        else                   res["data"] = d.object();
     }
     client->write(QJsonDocument(res).toJson(QJsonDocument::Compact) + "\n");
     client->flush();

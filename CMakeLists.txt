@@ -3,6 +3,7 @@ project(NothingBrowser)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
+
 find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
 find_package(OpenSSL REQUIRED)
@@ -39,13 +40,19 @@ add_executable(nothing-browser-headless
     ${SHARED_SOURCES}
 )
 
-# ── macOS bundle: full browser only ──────────────────────────────────────────
+# ── Headful binary (script-controlled, visible window) ───────────────────────
+add_executable(nothing-browser-headful
+    core/main_headful.cpp
+    ${SHARED_SOURCES}
+)
+
+# ── macOS bundle settings ─────────────────────────────────────────────────────
 set_target_properties(nothing-browser PROPERTIES
-    MACOSX_BUNDLE ON
-)
+    MACOSX_BUNDLE ON)
 set_target_properties(nothing-browser-headless PROPERTIES
-    MACOSX_BUNDLE OFF
-)
+    MACOSX_BUNDLE OFF)
+set_target_properties(nothing-browser-headful PROPERTIES
+    MACOSX_BUNDLE OFF)
 
 # ── Common libs ───────────────────────────────────────────────────────────────
 set(COMMON_LIBS
@@ -60,10 +67,13 @@ set(COMMON_LIBS
     OpenSSL::Crypto
 )
 
-target_include_directories(nothing-browser PRIVATE
-    core core/app core/tabs core/engine core/bridge)
-target_include_directories(nothing-browser-headless PRIVATE
-    core core/app core/tabs core/engine core/bridge)
+# ── Include dirs ──────────────────────────────────────────────────────────────
+set(COMMON_INCLUDES core core/app core/tabs core/engine core/bridge)
 
-target_link_libraries(nothing-browser ${COMMON_LIBS})
+target_include_directories(nothing-browser         PRIVATE ${COMMON_INCLUDES})
+target_include_directories(nothing-browser-headless PRIVATE ${COMMON_INCLUDES})
+target_include_directories(nothing-browser-headful  PRIVATE ${COMMON_INCLUDES})
+
+target_link_libraries(nothing-browser          ${COMMON_LIBS})
 target_link_libraries(nothing-browser-headless ${COMMON_LIBS})
+target_link_libraries(nothing-browser-headful  ${COMMON_LIBS})

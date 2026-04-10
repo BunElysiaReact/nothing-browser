@@ -1,9 +1,9 @@
+// core/main_headless.cpp
 #include <QApplication>
 #include <QWebEngineProfile>
 #include "engine/PiggyServer.h"
 
 int main(int argc, char *argv[]) {
-    // Must be set BEFORE QApplication
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
         "--disable-gpu "
         "--no-sandbox "
@@ -14,10 +14,10 @@ int main(int argc, char *argv[]) {
     );
     qputenv("QT_QPA_PLATFORM", "offscreen");
 
-    QApplication app(argc, argv);  // NOT QCoreApplication
+    QApplication app(argc, argv);
     app.setApplicationName("nothing-browser-headless");
 
-    PiggyServer server(nullptr);
+    PiggyServer server(static_cast<PiggyTab*>(nullptr));  // <-- cast fixes ambiguity
     server.start();
 
     qDebug() << "[Piggy] Headless daemon on socket: piggy";

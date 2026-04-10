@@ -31,11 +31,18 @@ struct InterceptRule {
 class PiggyServer : public QObject {
     Q_OBJECT
 public:
+    // headful mode — PiggyTab UI
     explicit PiggyServer(PiggyTab *piggy, QObject *parent = nullptr);
+    // headful window mode — bare page
+    explicit PiggyServer(QWebEnginePage *page, QObject *parent = nullptr);
     ~PiggyServer();
 
     void start();
     void stop();
+
+signals:
+    void tabCreated(const QString &tabId, QWebEnginePage *page);
+    void tabClosed(const QString &tabId);
 
 private slots:
     void onNewConnection();
@@ -64,7 +71,6 @@ private:
     void setImageBlocking(const QString &tabId, bool block);
 
     QList<QNetworkCookie> cookiesForTab(const QString &tabId);
-
     void applyInterceptRules(Interceptor *interceptor, const QVector<InterceptRule> &rules);
     QVector<InterceptRule> m_interceptRules;
 
@@ -72,11 +78,12 @@ private:
     void stopCapture(const QString &tabId);
     bool isCapturing(const QString &tabId) const;
 
-    PiggyTab              *m_piggy      = nullptr;
-    QLocalServer          *m_server     = nullptr;
+    PiggyTab          *m_piggy       = nullptr;
+    QWebEnginePage    *m_headfulPage = nullptr;   // headful window mode
+    QLocalServer      *m_server      = nullptr;
 
-    QWebEngineProfile     *m_ownProfile = nullptr;
-    QWebEnginePage        *m_ownPage    = nullptr;
+    QWebEngineProfile *m_ownProfile  = nullptr;
+    QWebEnginePage    *m_ownPage     = nullptr;
 
     struct TabContext {
         QWebEnginePage   *page        = nullptr;
@@ -91,8 +98,7 @@ private:
         QList<QPair<QString, QString>>   storageEntries;
     };
     QMap<QString, TabContext> m_tabs;
-
-    QList<QLocalSocket*>   m_clients;
+    QList<QLocalSocket*>      m_clients;
 
     static constexpr char SOCKET_NAME[] = "piggy";
 };
