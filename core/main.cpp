@@ -6,16 +6,30 @@ int main(int argc, char *argv[]) {
     // ── Chromium flags — set BEFORE QApplication ──────────────────────────────
     // --disable-blink-features=AutomationControlled:
     //   Makes navigator.webdriver return false at the engine level.
-    //   Because Chromium does it internally, toString() stays [native code].
-    //   Fixes: webDriverIsOn, hasToStringProxy (partially)
     //
-    // --disable-features=UserAgentClientHint:
-    //   Prevents QtWebEngine from injecting its own UA client hint overrides
-    //   that conflict with our Interceptor headers.
+    // --disable-dev-shm-usage:
+    //   FIX: prevents SIGSEGV (exit 139) on low-RAM machines — Chromium renderer
+    //   tries to use /dev/shm for shared memory; on machines with limited shm
+    //   (or low RAM like i3/8GB) this causes the renderer to segfault.
+    //   Forces renderer to use /tmp instead. Safe on all Linux setups.
+    //
+    // --disable-site-isolation-trials / --disable-features=IsolateOrigins:
+    //   FIX: ChatGPT sends COOP/COEP headers which trigger Chromium's renderer
+    //   process isolation. On QtWebEngine this races the JS context setup during
+    //   script injection and causes exit 139. Disabling prevents the crash.
+    //   Note: this does NOT disable HTTPS or origin security — just the extra
+    //   process-level renderer sandboxing that QtWebEngine can't recover from.
+    //
+    // --js-flags=--max-old-space-size=512:
+    //   FIX: caps V8 heap at 512 MB so the renderer doesn't OOM-kill on i3/8GB.
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
         "--disable-blink-features=AutomationControlled "
         "--no-sandbox "
-        "--allow-running-insecure-content"
+        "--allow-running-insecure-content "
+        "--disable-dev-shm-usage "
+        "--disable-site-isolation-trials "
+        "--disable-features=IsolateOrigins,WebRtcHideLocalIpsWithMdns "
+        "--js-flags=--max-old-space-size=512"
     );
 
     QApplication app(argc, argv);

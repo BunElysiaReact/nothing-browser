@@ -173,10 +173,19 @@ private:
 // ─── main ────────────────────────────────────────────────────────────────────
 
 int main(int argc, char *argv[]) {
+    // FIX: added --disable-dev-shm-usage       → prevents shm SIGSEGV on low-RAM machines
+    //      added --disable-site-isolation-trials → disables COOP renderer isolation
+    //        that crashes on ChatGPT (and other sites with COOP/COEP headers)
+    //      added --disable-features=IsolateOrigins → same family
+    //      added --js-flags                     → cap renderer heap for i3/8GB
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
         "--disable-blink-features=AutomationControlled "
         "--no-sandbox "
-        "--allow-running-insecure-content"
+        "--allow-running-insecure-content "
+        "--disable-dev-shm-usage "
+        "--disable-site-isolation-trials "
+        "--disable-features=IsolateOrigins,WebRtcHideLocalIpsWithMdns "
+        "--js-flags=--max-old-space-size=512"
     );
 
     QApplication app(argc, argv);
@@ -203,20 +212,22 @@ int main(int argc, char *argv[]) {
     auto &spoofer = FingerprintSpoofer::instance();
     profile->setHttpUserAgent(spoofer.identity().userAgent);
 
-    // fingerprint spoof
+    // FIX: DocumentCreation instead of DocumentReady.
+    //      DocumentReady on COOP-isolated pages (ChatGPT) races the renderer
+    //      context setup → SIGSEGV exit 139. DocumentCreation fires before
+    //      any page JS runs — stable on all sites including COOP ones.
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
     spoofScript.setSourceCode(spoofer.injectionScript());
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
-    // capture script
     QWebEngineScript capScript;
     capScript.setName("nothing_capture");
     capScript.setSourceCode(NetworkCapture::captureScript());
-    capScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
     capScript.setWorldId(QWebEngineScript::MainWorld);
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);

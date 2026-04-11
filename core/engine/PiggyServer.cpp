@@ -57,11 +57,14 @@ QString PiggyServer::createTab() {
     auto *p = new QWebEnginePage(profile, this);
 
     // Inject fingerprint spoof
+    // FIX: DocumentCreation (not DocumentReady) — fires before any page JS runs.
+    //      DocumentReady on COOP-isolated pages (ChatGPT) races the renderer
+    //      context setup and causes SIGSEGV (exit 139).
     auto &spoofer = FingerprintSpoofer::instance();
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint_" + id);
     spoofScript.setSourceCode(spoofer.injectionScript());
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
@@ -70,7 +73,7 @@ QString PiggyServer::createTab() {
     QWebEngineScript capScript;
     capScript.setName("nothing_capture_" + id);
     capScript.setSourceCode(NetworkCapture::captureScript());
-    capScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
     capScript.setWorldId(QWebEngineScript::MainWorld);
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);
