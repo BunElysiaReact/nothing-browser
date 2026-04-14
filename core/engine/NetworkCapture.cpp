@@ -103,6 +103,13 @@ void NetworkCapture::onJsMessage(const QString &json) {
                 obj["value"].toString(),
                 obj["storageType"].toString()
             );
+
+        } else if (type == "exposed_call") {
+            emit exposedFunctionCalled(
+                obj["name"].toString(),
+                obj["callId"].toString(),
+                obj["data"].toString()
+            );
         }
     }
 }
@@ -122,6 +129,54 @@ void NetworkCapture::onCookieAdded(const QNetworkCookie &c) {
 
 void NetworkCapture::onCookieRemoved(const QNetworkCookie &c) {
     emit cookieRemoved(QString::fromUtf8(c.name()), c.domain());
+}
+
+QString NetworkCapture::exposeFunctionScript(const QString &name) {
+    return QString(R"JS(
+(function() {
+    'use strict';
+    var _name = '%1';
+    
+    if (!window.__NOTHING_EXPOSED_RESOLVERS__) {
+        window.__NOTHING_EXPOSED_RESOLVERS__ = {};
+    }
+    
+    window[_name] = function(data) {
+        return new Promise(function(resolve, reject) {
+            var callId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            
+            window.__NOTHING_EXPOSED_RESOLVERS__[callId] = { 
+                resolve: resolve, 
+                reject: reject 
+            };
+            
+            var payload = typeof data === 'string' ? data : JSON.stringify(data);
+            window.__NOTHING_QUEUE__.push({
+                type:   'exposed_call',
+                name:   _name,
+                callId: callId,
+                data:   payload
+            });
+        });
+    };
+
+    window.__NOTHING_RESOLVE_EXPOSED__ = function(callId, result, isError) {
+        var r = window.__NOTHING_EXPOSED_RESOLVERS__ && 
+                window.__NOTHING_EXPOSED_RESOLVERS__[callId];
+        if (!r) return;
+        delete window.__NOTHING_EXPOSED_RESOLVERS__[callId];
+        if (isError) {
+            r.reject(new Error(result));
+        } else {
+            try {
+                r.resolve(JSON.parse(result));
+            } catch(e) {
+                r.resolve(result);
+            }
+        }
+    };
+})();
+)JS").arg(name);
 }
 
 QString NetworkCapture::captureScript() {
@@ -296,5 +351,12 @@ try { wrapStorage(window.localStorage,   'localStorage');   } catch(e) {}
 try { wrapStorage(window.sessionStorage, 'sessionStorage'); } catch(e) {}
 
 })();
+)JS";
+}
+
+QString NetworkCapture::workerCaptureScript() {
+    return R"JS(
+// Worker capture - placeholder for now
+console.log('[Nothing] Worker capture initialized');
 )JS";
 }

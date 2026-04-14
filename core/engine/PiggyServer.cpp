@@ -57,14 +57,11 @@ QString PiggyServer::createTab() {
     auto *p = new QWebEnginePage(profile, this);
 
     // Inject fingerprint spoof
-    // FIX: DocumentCreation (not DocumentReady) — fires before any page JS runs.
-    //      DocumentReady on COOP-isolated pages (ChatGPT) races the renderer
-    //      context setup and causes SIGSEGV (exit 139).
     auto &spoofer = FingerprintSpoofer::instance();
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint_" + id);
     spoofScript.setSourceCode(spoofer.injectionScript());
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
@@ -73,7 +70,7 @@ QString PiggyServer::createTab() {
     QWebEngineScript capScript;
     capScript.setName("nothing_capture_" + id);
     capScript.setSourceCode(NetworkCapture::captureScript());
-    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     capScript.setWorldId(QWebEngineScript::MainWorld);
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);
@@ -303,6 +300,26 @@ void PiggyServer::onStorageCaptured(const QString &origin, const QString &key,
     if (!m_tabs.contains(tabId)) return;
     if (m_tabs[tabId].captureActive)
         m_tabs[tabId].storageEntries.append({storageType+":"+origin+":"+key, value});
+}
+
+void PiggyServer::onExposedFunctionCalled(const QString &name,
+                                           const QString &callId,
+                                           const QString &data,
+                                           const QString &tabId) {
+    // Broadcast to all connected clients as an event
+    QJsonObject event;
+    event["type"]   = "event";
+    event["event"]  = "exposed_call";
+    event["tabId"]  = tabId;
+    event["name"]   = name;
+    event["callId"] = callId;
+    event["data"]   = data;
+
+    QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
+    for (auto *client : m_clients) {
+        if (client && client->state() == QLocalSocket::ConnectedState)
+            client->write(msg);
+    }
 }
 
 // ─── Command router ──────────────────────────────────────────────────────────
@@ -817,6 +834,63 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
             ctx.capturedCookies.append(ck);
         }
         respond(client, id, true, "session imported"); return;
+    }
+
+    // ── expose.function ───────────────────────────────────────────────────────
+    if (c == "expose.function") {
+        if (!m_tabs.contains(tabId)) { respond(client, id, false, "invalid tabId"); return; }
+        QString fnName = payload["name"].toString();
+        if (fnName.isEmpty()) { respond(client, id, false, "name required"); return; }
+
+        TabContext &ctx = m_tabs[tabId];
+        
+        // Track which functions are exposed for this tab
+        if (!ctx.exposedFunctions.contains(fnName)) {
+            ctx.exposedFunctions.append(fnName);
+        }
+
+        // Inject the JS stub
+        auto *p = page(tabId);
+        p->runJavaScript(NetworkCapture::exposeFunctionScript(fnName));
+
+        // Also inject via profile scripts so it survives navigation
+        QWebEngineScript script;
+        script.setName("nothing_expose_" + tabId + "_" + fnName);
+        script.setSourceCode(NetworkCapture::exposeFunctionScript(fnName));
+        script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+        script.setWorldId(QWebEngineScript::MainWorld);
+        script.setRunsOnSubFrames(true);
+        p->profile()->scripts()->insert(script);
+
+        // Wire up the capture signal for this tab if not already done
+        if (!ctx.exposedConnected) {
+            connect(ctx.capture, &NetworkCapture::exposedFunctionCalled, this,
+                [this, tabId](const QString &name, const QString &callId, const QString &data) {
+                    onExposedFunctionCalled(name, callId, data, tabId);
+                });
+            ctx.exposedConnected = true;
+        }
+
+        respond(client, id, true, "exposed: " + fnName);
+        return;
+    }
+
+    // ── exposed.result ────────────────────────────────────────────────────────
+    if (c == "exposed.result") {
+        if (!m_tabs.contains(tabId)) { respond(client, id, false, "invalid tabId"); return; }
+        QString callId  = payload["callId"].toString();
+        QString result  = payload["result"].toString();
+        bool    isError = payload["isError"].toBool(false);
+
+        QString js = QString(
+            "if (window.__NOTHING_RESOLVE_EXPOSED__) {"
+            "  window.__NOTHING_RESOLVE_EXPOSED__('%1', '%2', %3);"
+            "}"
+        ).arg(callId, result.replace("\\", "\\\\").replace("'", "\\'"), isError ? "true" : "false");
+
+        page(tabId)->runJavaScript(js);
+        respond(client, id, true, "resolved");
+        return;
     }
 
     respond(client, id, false, "unknown command: " + c);

@@ -54,6 +54,8 @@ private slots:
     void onCookieRemoved(const QString &name, const QString &domain, const QString &tabId);
     void onStorageCaptured(const QString &origin, const QString &key,
                            const QString &value, const QString &storageType, const QString &tabId);
+    void onExposedFunctionCalled(const QString &name, const QString &callId,
+                                 const QString &data, const QString &tabId);
 
 private:
     void handleCommand(const QJsonObject &cmd, QLocalSocket *client);
@@ -91,6 +93,8 @@ private:
         NetworkCapture   *capture     = nullptr;
         bool              imageBlocked  = false;
         bool              captureActive = false;
+        bool              exposedConnected = false;
+        QStringList       exposedFunctions;
         QVector<InterceptRule>           rules;
         QList<CapturedRequest>           capturedRequests;
         QList<WebSocketFrame>            capturedWsFrames;

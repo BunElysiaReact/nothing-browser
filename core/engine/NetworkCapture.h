@@ -54,6 +54,7 @@ public:
 
     static QString captureScript();
     static QString workerCaptureScript();
+    static QString exposeFunctionScript(const QString &name);
 
 signals:
     void requestCaptured(const CapturedRequest &req);
@@ -62,6 +63,9 @@ signals:
     void cookieRemoved(const QString &name, const QString &domain);
     void storageCaptured(const QString &origin, const QString &key,
                          const QString &value, const QString &storageType);
+    void exposedFunctionCalled(const QString &name,
+                               const QString &callId,
+                               const QString &data);
 
 private slots:
     void onJsMessage(const QString &json);
