@@ -91,6 +91,7 @@ private:
         QWebEnginePage   *page        = nullptr;
         Interceptor      *interceptor = nullptr;
         NetworkCapture   *capture     = nullptr;
+        QStringList        initScripts;
         bool              imageBlocked  = false;
         bool              captureActive = false;
         bool              exposedConnected = false;

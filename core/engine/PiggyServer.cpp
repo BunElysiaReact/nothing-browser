@@ -892,6 +892,30 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
         respond(client, id, true, "resolved");
         return;
     }
+    // ── addInitScript ─────────────────────────────────────────────────────────
+if (c == "addInitScript") {
+    if (!m_tabs.contains(tabId)) { respond(client, id, false, "invalid tabId"); return; }
+    QString js = payload["js"].toString();
+    if (js.isEmpty()) { respond(client, id, false, "js required"); return; }
+
+    TabContext &ctx = m_tabs[tabId];
+    ctx.initScripts.append(js);
+
+    // Inject as a persistent DocumentCreation script on the profile
+    QWebEngineScript script;
+    QString scriptName = QString("nothing_init_%1_%2")
+                             .arg(tabId)
+                             .arg(ctx.initScripts.size());
+    script.setName(scriptName);
+    script.setSourceCode(js);
+    script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    script.setWorldId(QWebEngineScript::MainWorld);
+    script.setRunsOnSubFrames(true);
+    ctx.page->profile()->scripts()->insert(script);
+
+    respond(client, id, true, "init script added");
+    return;
+}
 
     respond(client, id, false, "unknown command: " + c);
 }
