@@ -96,7 +96,20 @@ QString PiggyServer::createTab() {
                        const QString &value, const QString &type) {
                 onStorageCaptured(origin, key, value, type, id);
             });
-
+    connect(p, &QWebEnginePage::urlChanged, this,
+            [this, id](const QUrl &url) {
+            QJsonObject event;
+            event["type"]  = "event";
+            event["event"] = "navigate";
+            event["tabId"] = id;
+            event["url"]   = url.toString();
+    
+            QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
+            for (auto *client : m_clients) {
+                if (client && client->state() == QLocalSocket::ConnectedState)
+                    client->write(msg);
+            }
+    });
     TabContext ctx;
     ctx.page        = p;
     ctx.interceptor = interceptor;
