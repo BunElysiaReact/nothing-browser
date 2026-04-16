@@ -26,6 +26,7 @@
 #include <QMouseEvent>
 #include <QTimer>
 #include <QFrame>
+#include <QEvent>  // ADDED for eventFilter
 
 struct YTResult {
     QString id, url, title, uploader, thumbnail;
@@ -102,6 +103,9 @@ class YoutubeTab : public QWidget {
     Q_OBJECT
 public:
     explicit YoutubeTab(QWidget *parent = nullptr);
+
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;  // ADDED for background resize
 
 private slots:
     // navigation

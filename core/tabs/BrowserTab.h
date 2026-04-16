@@ -5,6 +5,7 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QLabel>
+#include <QJsonArray>
 #include "../engine/NetworkCapture.h"
 #include "../engine/PluginManager.h"
 
@@ -16,8 +17,6 @@ public:
     explicit BrowserTab(QWidget *parent = nullptr);
 
     NetworkCapture *networkCapture() const { return m_capture; }
-
-    // Run arbitrary JS in the current page
     void runJS(const QString &script);
 
 signals:
@@ -27,22 +26,42 @@ signals:
 
 private slots:
     void navigate();
+    void navigateToUrl(const QUrl &url);
     void onUrlChanged(const QUrl &url);
     void toggleJS(bool enabled);
     void toggleCSS(bool enabled);
     void toggleImages(bool enabled);
+    void goHome();
+    void goBack();
+    void refreshPage();
 
 private:
     QWebEngineView *m_view;
     QLineEdit      *m_urlBar;
     QPushButton    *m_goBtn;
+    QPushButton    *m_homeBtn;
+    QPushButton    *m_backBtn;
+    QPushButton    *m_refreshBtn;
     QCheckBox      *m_jsToggle;
     QCheckBox      *m_cssToggle;
     QCheckBox      *m_imgToggle;
     QLabel         *m_statusLabel;
     Interceptor    *m_interceptor;
     NetworkCapture *m_capture;
+    bool            m_onHomePage = true;
+
+    // Shortcuts storage
+    QJsonArray      m_shortcuts;
+    QString         m_shortcutsPath;
+    QString         m_bgImagePath;
+
     void setupUI();
     void setupWebEngine();
     void applySettings();
+    void showHomePage();
+    void loadShortcuts();
+    void saveShortcuts();
+    QString buildHomeHTML();
+    QString shortcutsJson();
+    QString toolbarButtonStyle(const QString &extra = "");
 };

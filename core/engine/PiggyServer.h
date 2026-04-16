@@ -12,6 +12,8 @@
 #include <QVector>
 #include <QList>
 #include <QUuid>
+#include <QDir>
+#include <QSet>
 
 class PiggyTab;
 class NetworkCapture;

@@ -9,6 +9,7 @@
 #include <QPixmap>
 #include <QRegularExpression>
 #include <QGraphicsOpacityEffect>
+#include <QEvent>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  VideoCard
@@ -465,28 +466,57 @@ void YoutubeTab::buildHomePage() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  Results Page
+//  Results Page (UPDATED with working background image)
 // ═════════════════════════════════════════════════════════════════════════════
 void YoutubeTab::buildResultsPage() {
-    m_resultsPage = new QLabel;
+    m_resultsPage = new QWidget();  // Changed from QLabel to QWidget
     m_resultsPage->setObjectName("resultsPage");
-    m_resultsPage->setStyleSheet(R"(
-        QWidget#resultsPage {
-            background-image: url(:/icons/elysia.jpeg);
-            background-repeat: no-repeat;
-            background-position: right center;
-            background-color: #0f0f0f;
-        }
-    )");
 
-    auto *root = new QVBoxLayout(m_resultsPage);
+    // Create a layered container for background image
+    QVBoxLayout* root = new QVBoxLayout(m_resultsPage);
     root->setContentsMargins(0,0,0,0);
     root->setSpacing(0);
 
-    // ── Top bar ───────────────────────────────────────────────────────────────
+    // ── BACKGROUND LAYER (using QLabel with pixmap - RELIABLE) ──
+    QLabel* backgroundLayer = new QLabel(m_resultsPage);
+    backgroundLayer->setObjectName("resultsBackground");
+    backgroundLayer->lower(); // Send to bottom
+
+    // Load and scale the background image
+    QPixmap bgPixmap(":/icons/elysia.jpeg");
+    if (!bgPixmap.isNull()) {
+        // Scale keeping aspect ratio, centered
+        QPixmap scaledBg = bgPixmap.scaled(
+            m_resultsPage->size(),
+            Qt::KeepAspectRatioByExpanding,
+            Qt::SmoothTransformation
+        );
+        backgroundLayer->setPixmap(scaledBg);
+        backgroundLayer->setScaledContents(false);
+        backgroundLayer->setAlignment(Qt::AlignCenter);
+    } else {
+        backgroundLayer->setStyleSheet("background-color: #0f0f0f;");
+    }
+
+    // Make background stretch when window resizes
+    backgroundLayer->setGeometry(m_resultsPage->rect());
+
+    // ── MAIN CONTENT (transparent background so image shows through) ──
+    QWidget* contentLayer = new QWidget(m_resultsPage);
+    contentLayer->setStyleSheet("background: transparent;");
+    contentLayer->setGeometry(m_resultsPage->rect());
+
+    QVBoxLayout* contentLayout = new QVBoxLayout(contentLayer);
+    contentLayout->setContentsMargins(0,0,0,0);
+    contentLayout->setSpacing(0);
+
+    // ── Top bar (semi-transparent so background shows) ──
     auto *topBar = new QWidget;
     topBar->setFixedHeight(56);
-    topBar->setStyleSheet("background:#0f0f0f; border-bottom:1px solid #1e1e1e;");
+    topBar->setStyleSheet(
+        "background: rgba(15,15,15,0.85);"  // Semi-transparent!
+        "border-bottom: 1px solid rgba(30,30,30,0.8);"
+    );
     auto *tbl = new QHBoxLayout(topBar);
     tbl->setContentsMargins(16,0,16,0);
     tbl->setSpacing(12);
@@ -504,12 +534,12 @@ void YoutubeTab::buildResultsPage() {
     m_backBtn->setCursor(Qt::PointingHandCursor);
     m_backBtn->setStyleSheet(R"(
         QPushButton {
-            background:transparent; color:#aaa;
-            border:1px solid #333; border-radius:4px;
+            background: rgba(0,0,0,0.5); color:#aaa;
+            border: 1px solid #333; border-radius:4px;
             font-size:11px; padding:5px 12px;
             font-family:'Segoe UI',sans-serif;
         }
-        QPushButton:hover { color:#fff; border-color:#555; }
+        QPushButton:hover { color:#fff; border-color:#555; background: rgba(0,0,0,0.7); }
     )");
     connect(m_backBtn, &QPushButton::clicked, this, &YoutubeTab::onBackHome);
 
@@ -518,12 +548,15 @@ void YoutubeTab::buildResultsPage() {
     m_topSearch->setFixedHeight(38);
     m_topSearch->setStyleSheet(R"(
         QLineEdit {
-            background:#121212; color:#f1f1f1;
-            border:1px solid #303030; border-radius:19px;
-            padding:6px 18px; font-size:13px;
-            font-family:'Segoe UI','Noto Sans',sans-serif;
+            background: rgba(18,18,18,0.9);
+            color: #f1f1f1;
+            border: 1px solid #303030;
+            border-radius: 19px;
+            padding: 6px 18px;
+            font-size: 13px;
+            font-family: 'Segoe UI','Noto Sans',sans-serif;
         }
-        QLineEdit:focus { border-color:#ff4444; }
+        QLineEdit:focus { border-color: #ff4444; background: rgba(0,0,0,0.8); }
     )");
     connect(m_topSearch, &QLineEdit::returnPressed, this, &YoutubeTab::onTopSearch);
 
@@ -532,17 +565,18 @@ void YoutubeTab::buildResultsPage() {
     m_topSearchBtn->setCursor(Qt::PointingHandCursor);
     m_topSearchBtn->setStyleSheet(R"(
         QPushButton {
-            background:#222; color:#fff;
-            border:1px solid #333; border-radius:19px; font-size:14px;
+            background: rgba(34,34,34,0.9); color:#fff;
+            border: 1px solid #333; border-radius: 19px;
+            font-size: 14px;
         }
-        QPushButton:hover { background:#ff4444; border-color:#ff4444; }
+        QPushButton:hover { background: #ff4444; border-color: #ff4444; }
     )");
     connect(m_topSearchBtn, &QPushButton::clicked, this, &YoutubeTab::onTopSearch);
 
     m_statusLabel = new QLabel("", topBar);
     m_statusLabel->setFixedWidth(200);
     m_statusLabel->setStyleSheet(
-        "color:#555; font-size:11px; font-family:monospace; background:transparent;");
+        "color:#888; font-size:11px; font-family:monospace; background:transparent;");
 
     tbl->addWidget(miniLogo);
     tbl->addWidget(m_backBtn);
@@ -550,31 +584,36 @@ void YoutubeTab::buildResultsPage() {
     tbl->addWidget(m_topSearch, 1);
     tbl->addWidget(m_topSearchBtn);
     tbl->addWidget(m_statusLabel);
-    root->addWidget(topBar);
+    contentLayout->addWidget(topBar);
 
-    // ── Body splitter: grid | player+queue ───────────────────────────────────
+    // ── Body splitter: grid | player+queue ──
     auto *splitter = new QSplitter(Qt::Horizontal);
     splitter->setHandleWidth(1);
-    splitter->setStyleSheet("QSplitter::handle { background:#1e1e1e; }");
+    splitter->setStyleSheet("QSplitter::handle { background: #1e1e1e; }");
 
-    // LEFT: card grid
+    // LEFT: card grid (semi-transparent background)
     m_gridScroll = new QScrollArea;
     m_gridScroll->setWidgetResizable(true);
     m_gridScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_gridScroll->setStyleSheet("background:rgba(15,15,15,0.85); border:none;");
+    m_gridScroll->setStyleSheet(
+        "QScrollArea { background: rgba(15,15,15,0.75); border: none; }"
+        "QScrollBar:vertical { background: rgba(15,15,15,0.5); width: 6px; border: none; }"
+        "QScrollBar::handle:vertical { background: #444; border-radius: 3px; min-height: 20px; }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+    );
     m_gridScroll->setMinimumWidth(280);
 
     m_gridContainer = new QWidget;
-    m_gridContainer->setStyleSheet("background:transparent;");
+    m_gridContainer->setStyleSheet("background: transparent;");
     m_gridLayout = new QGridLayout(m_gridContainer);
     m_gridLayout->setContentsMargins(16,16,16,16);
     m_gridLayout->setSpacing(14);
     m_gridLayout->setAlignment(Qt::AlignTop|Qt::AlignLeft);
     m_gridScroll->setWidget(m_gridContainer);
 
-    // RIGHT: player + queue stacked vertically
+    // RIGHT: player + queue (semi-transparent)
     auto *rightPanel = new QWidget;
-    rightPanel->setStyleSheet("background:rgba(15,15,15,0.92);");
+    rightPanel->setStyleSheet("background: rgba(15,15,15,0.85);");
     auto *rpl = new QVBoxLayout(rightPanel);
     rpl->setContentsMargins(0,0,0,0);
     rpl->setSpacing(0);
@@ -582,31 +621,33 @@ void YoutubeTab::buildResultsPage() {
     // Player
     m_playerStack = new QStackedWidget(rightPanel);
     m_playerStack->setMinimumHeight(280);
-    m_playerStack->setStyleSheet("background:#000;");
+    m_playerStack->setStyleSheet("background: rgba(0,0,0,0.6);");
 
     auto *placeholder = new QWidget(m_playerStack);
-    placeholder->setStyleSheet("background:#0a0a0a;");
+    placeholder->setStyleSheet("background: rgba(10,10,10,0.5);");
     auto *phL = new QVBoxLayout(placeholder);
     phL->setAlignment(Qt::AlignCenter);
     auto *phIcon = new QLabel("▶");
     phIcon->setAlignment(Qt::AlignCenter);
-    phIcon->setStyleSheet("color:#1e1e1e; font-size:64px; background:transparent;");
+    phIcon->setStyleSheet("color:#2a2a2a; font-size:64px; background:transparent;");
     auto *phText = new QLabel("double-click a card to play");
     phText->setAlignment(Qt::AlignCenter);
     phText->setStyleSheet(
-        "color:#333; font-size:12px; letter-spacing:1px;"
+        "color:#555; font-size:12px; letter-spacing:1px;"
         "font-family:'Segoe UI',sans-serif; background:transparent;");
     phL->addWidget(phIcon);
     phL->addWidget(phText);
 
     m_player = new QWebEngineView(m_playerStack);
+    m_player->setStyleSheet("QWebEngineView { background: #0a0a0a; }");
+    m_player->page()->setBackgroundColor(Qt::black);
     m_playerStack->addWidget(placeholder);
     m_playerStack->addWidget(m_player);
     m_playerStack->setCurrentIndex(0);
 
     // Info bar below player
     auto *infoArea = new QWidget(rightPanel);
-    infoArea->setStyleSheet("background:#0f0f0f; border-top:1px solid #1e1e1e;");
+    infoArea->setStyleSheet("background: rgba(15,15,15,0.9); border-top: 1px solid #1e1e1e;");
     auto *il = new QVBoxLayout(infoArea);
     il->setContentsMargins(14,12,14,10);
     il->setSpacing(5);
@@ -627,6 +668,7 @@ void YoutubeTab::buildResultsPage() {
     m_descView->setReadOnly(true);
     m_descView->setFixedHeight(48);
     m_descView->setPlaceholderText("description...");
+    m_descView->setStyleSheet("background: rgba(0,0,0,0.5); color: #aaa; border: none;");
 
     // Controls row
     auto *ctrlRow = new QHBoxLayout;
@@ -652,12 +694,12 @@ void YoutubeTab::buildResultsPage() {
         b->setCursor(Qt::PointingHandCursor);
         b->setStyleSheet(R"(
             QPushButton {
-                background:transparent; color:#aaa;
-                border:1px solid #333; border-radius:17px;
-                font-size:16px;
+                background: transparent; color: #aaa;
+                border: 1px solid #333; border-radius: 17px;
+                font-size: 16px;
             }
-            QPushButton:hover { color:#fff; border-color:#ff4444; }
-            QPushButton:disabled { color:#2a2a2a; border-color:#1a1a1a; }
+            QPushButton:hover { color: #fff; border-color: #ff4444; background: rgba(0,0,0,0.3); }
+            QPushButton:disabled { color: #2a2a2a; border-color: #1a1a1a; }
         )");
         return b;
     };
@@ -684,6 +726,10 @@ void YoutubeTab::buildResultsPage() {
     m_progress->setRange(0,100);
     m_progress->setFixedHeight(5);
     m_progress->hide();
+    m_progress->setStyleSheet(R"(
+        QProgressBar { background: #222; border: none; border-radius: 3px; height: 6px; }
+        QProgressBar::chunk { background: #ff4444; border-radius: 3px; }
+    )");
     m_progressLabel = new QLabel("", infoArea);
     m_progressLabel->setStyleSheet("color:#555; font-size:10px; background:transparent;");
     progRow->addWidget(m_progress,1);
@@ -699,7 +745,7 @@ void YoutubeTab::buildResultsPage() {
     auto *queueHeader = new QWidget(rightPanel);
     queueHeader->setFixedHeight(32);
     queueHeader->setStyleSheet(
-        "background:#111; border-top:1px solid #1e1e1e;");
+        "background: rgba(17,17,17,0.9); border-top: 1px solid #1e1e1e;");
     auto *qhl = new QHBoxLayout(queueHeader);
     qhl->setContentsMargins(14,0,14,0);
     m_queueLabel = new QLabel("QUEUE  ( 0 )", queueHeader);
@@ -710,11 +756,11 @@ void YoutubeTab::buildResultsPage() {
     clearBtn->setCursor(Qt::PointingHandCursor);
     clearBtn->setStyleSheet(R"(
         QPushButton {
-            background:transparent; color:#333;
-            border:none; font-size:10px;
-            font-family:monospace;
+            background: transparent; color: #333;
+            border: none; font-size: 10px;
+            font-family: monospace;
         }
-        QPushButton:hover { color:#ff4444; }
+        QPushButton:hover { color: #ff4444; }
     )");
     connect(clearBtn, &QPushButton::clicked, this, [this]() {
         m_queue.clear();
@@ -731,9 +777,10 @@ void YoutubeTab::buildResultsPage() {
     m_queueList = new QListWidget(rightPanel);
     m_queueList->setFixedHeight(120);
     m_queueList->setStyleSheet(
-        "QListWidget { background:#0a0a0a; border:none; }"
-        "QListWidget::item { padding:5px 12px; border-bottom:1px solid #141414; color:#aaa; }"
-        "QListWidget::item:selected { background:#1a0000; color:#ff4444; }");
+        "QListWidget { background: rgba(10,10,10,0.8); border: none; }"
+        "QListWidget::item { padding: 5px 12px; border-bottom: 1px solid #141414; color: #aaa; }"
+        "QListWidget::item:selected { background: #2a0000; color: #ff4444; }"
+        "QListWidget::item:hover { background: #1a1a1a; }");
     connect(m_queueList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
         int idx = item->data(Qt::UserRole).toInt();
         playQueueIndex(idx);
@@ -747,7 +794,35 @@ void YoutubeTab::buildResultsPage() {
     splitter->addWidget(m_gridScroll);
     splitter->addWidget(rightPanel);
     splitter->setSizes({480,760});
-    root->addWidget(splitter,1);
+    contentLayout->addWidget(splitter, 1);
+
+    // Add everything to the main layout
+    root->addWidget(contentLayer, 1);
+
+    // Handle resize events to keep background scaled
+    m_resultsPage->installEventFilter(this);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  Event filter for background resize
+// ═════════════════════════════════════════════════════════════════════════════
+bool YoutubeTab::eventFilter(QObject* obj, QEvent* event) {
+    if (obj == m_resultsPage && event->type() == QEvent::Resize) {
+        QLabel* bg = m_resultsPage->findChild<QLabel*>("resultsBackground");
+        if (bg) {
+            bg->setGeometry(m_resultsPage->rect());
+            QPixmap bgPixmap(":/icons/elysia.jpeg");
+            if (!bgPixmap.isNull()) {
+                QPixmap scaledBg = bgPixmap.scaled(
+                    m_resultsPage->size(),
+                    Qt::KeepAspectRatioByExpanding,
+                    Qt::SmoothTransformation
+                );
+                bg->setPixmap(scaledBg);
+            }
+        }
+    }
+    return QWidget::eventFilter(obj, event);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -18,6 +18,10 @@
 #include <QMarginsF>
 #include <QTimer>
 #include <QRegularExpression>
+#include <QDir>
+#include <QSet>
+
+static void configureProfile(QWebEngineProfile *profile); // forward decl
 
 // ─── Constructors ─────────────────────────────────────────────────────────────
 
@@ -25,9 +29,8 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     : QObject(parent), m_piggy(piggy)
 {
     if (!m_piggy) {
-        m_ownProfile = new QWebEngineProfile(this);
-        m_ownProfile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
-        m_ownProfile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+        m_ownProfile = new QWebEngineProfile("piggy-persistent", this);
+        configureProfile(m_ownProfile);
         m_ownPage = new QWebEnginePage(m_ownProfile, this);
     }
 }
@@ -39,6 +42,130 @@ PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
 }
 
 PiggyServer::~PiggyServer() { stop(); }
+
+// ─── Profile configuration (WhatsApp / modern site compat) ───────────────────
+
+static void configureProfile(QWebEngineProfile *profile) {
+    // Disk-backed storage so IndexedDB / localStorage survive reloads
+    QString base = QDir::homePath() + "/.piggy/" + profile->storageName();
+    profile->setPersistentStoragePath(base + "/storage");
+    profile->setCachePath(base + "/cache");
+    profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+    profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+
+    // UA that WhatsApp accepts — must look like real Chrome on Windows
+    profile->setHttpUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    );
+
+    // Enable every API WhatsApp needs
+    auto *s = profile->settings();
+    s->setAttribute(QWebEngineSettings::LocalStorageEnabled,             true);
+    s->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+    s->setAttribute(QWebEngineSettings::AllowRunningInsecureContent,     true);
+    s->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows,        true);
+    s->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard,    true);
+    s->setAttribute(QWebEngineSettings::WebGLEnabled,                    true);
+    s->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled,      true);
+    s->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,           true);
+
+    // Inject chrome + navigator spoofs at DocumentCreation so they land
+    // before WhatsApp's bundle reads them
+    static const QString kChromeSpoof = R"JS(
+(function() {
+    // navigator.webdriver = false
+    Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+
+    // Realistic plugin list
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => { var arr=[{name:'Chrome PDF Plugin'},{name:'Chrome PDF Viewer'},{name:'Native Client'}]; arr.item=i=>arr[i]; arr.refresh=()=>{}; arr.namedItem=n=>arr.find(p=>p.name===n)||null; return arr; },
+        configurable: true
+    });
+
+    // Languages
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'], configurable: true });
+
+    // Platform
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32', configurable: true });
+
+    // navigator.userAgent (belt-and-suspenders alongside profile UA)
+    Object.defineProperty(navigator, 'userAgent', {
+        get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        configurable: true
+    });
+
+    // userAgentData — what modern sites prefer over userAgent
+    Object.defineProperty(navigator, 'userAgentData', {
+        get: () => ({
+            brands: [
+                { brand: 'Chromium',      version: '124' },
+                { brand: 'Google Chrome', version: '124' },
+                { brand: 'Not-A.Brand',   version: '99'  }
+            ],
+            mobile: false,
+            platform: 'Windows',
+            getHighEntropyValues: function(hints) {
+                return Promise.resolve({
+                    platform: 'Windows', platformVersion: '10.0.0',
+                    architecture: 'x86', bitness: '64', model: '',
+                    uaFullVersion: '124.0.0.0',
+                    fullVersionList: [
+                        { brand: 'Chromium',      version: '124.0.0.0' },
+                        { brand: 'Google Chrome', version: '124.0.0.0' },
+                        { brand: 'Not-A.Brand',   version: '99.0.0.0'  }
+                    ]
+                });
+            }
+        }),
+        configurable: true
+    });
+
+    // window.chrome — WhatsApp checks this to confirm real Chrome
+    if (!window.chrome) {
+        window.chrome = {
+            runtime: {
+                onMessage:    { addListener: function(){}, removeListener: function(){} },
+                sendMessage:  function(){},
+                connect:      function(){ return { onMessage:{ addListener:function(){} }, postMessage:function(){}, disconnect:function(){} }; },
+                onConnect:    { addListener: function(){} },
+                id: undefined
+            },
+            loadTimes: function(){ return {}; },
+            csi:       function(){ return {}; }
+        };
+    }
+
+    // Permissions API — WhatsApp calls navigator.permissions.query
+    if (!navigator.permissions) {
+        Object.defineProperty(navigator, 'permissions', {
+            get: () => ({ query: function(p){ return Promise.resolve({ state:'granted', onchange:null }); } }),
+            configurable: true
+        });
+    }
+
+    // Storage persistence — fixes "aquire-persistent-storage-denied"
+    if (navigator.storage) {
+        navigator.storage.persist  = function(){ return Promise.resolve(true); };
+        navigator.storage.persisted= function(){ return Promise.resolve(true); };
+    }
+
+    // Notification permission — WhatsApp checks this
+    if (window.Notification) {
+        Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
+    }
+})();
+)JS";
+
+    QWebEngineScript spoofChrome;
+    spoofChrome.setName("nothing_chrome_spoof_global");
+    spoofChrome.setSourceCode(kChromeSpoof);
+    spoofChrome.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    spoofChrome.setWorldId(QWebEngineScript::MainWorld);
+    spoofChrome.setRunsOnSubFrames(true);
+    profile->scripts()->insert(spoofChrome);
+}
 
 // ─── Tab management ──────────────────────────────────────────────────────────
 
@@ -53,6 +180,14 @@ QString PiggyServer::createTab() {
         profile = m_headfulPage->profile();
     else
         profile = m_ownProfile;
+
+    // Make sure any externally-owned profile is also properly configured
+    // (covers the headful window case where profile was created outside PiggyServer)
+    static QSet<QWebEngineProfile*> s_configured;
+    if (!s_configured.contains(profile)) {
+        configureProfile(profile);
+        s_configured.insert(profile);
+    }
 
     auto *p = new QWebEnginePage(profile, this);
 
