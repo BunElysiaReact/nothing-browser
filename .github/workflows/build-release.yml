@@ -76,7 +76,7 @@ jobs:
           Package: nothing-browser
           Version: ${VERSION}
           Architecture: amd64
-          Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
+          Maintainer: peaseernest <ernesttechhouse@gmail.com>
           Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6, openjdk-17-jre
           Description: Nothing Browser — Does nothing, except everything that matters.
           EOF
@@ -123,7 +123,7 @@ jobs:
           Package: nothing-browser-headless
           Version: ${VERSION}
           Architecture: amd64
-          Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
+          Maintainer: peaseernest <ernesttechhouse@gmail.com>
           Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6
           Description: Nothing Browser Headless — Piggy daemon for the nothingbrowser scraping lib.
           EOF
@@ -160,7 +160,7 @@ jobs:
           Package: nothing-browser-headful
           Version: ${VERSION}
           Architecture: amd64
-          Maintainer: BunElysiaReact <hello@nothingbrowser.dev>
+          Maintainer: peaseernest <ernesttechhouse@gmail.com>
           Depends: libqt6webenginewidgets6, libqt6widgets6, libqt6network6
           Description: Nothing Browser Headful — Script-controlled visible window for the nothingbrowser scraping lib.
           EOF
@@ -242,7 +242,6 @@ jobs:
                       Select-Object -First 1 -ExpandProperty DirectoryName
           Write-Host "Qt cmake dir: $cmakeDir"
           echo "QT_CMAKE_DIR=$cmakeDir" >> $env:GITHUB_ENV
-
           $qtRoot = Split-Path (Split-Path (Split-Path $cmakeDir))
           Write-Host "Qt root: $qtRoot"
           echo "QT_ROOT=$qtRoot" >> $env:GITHUB_ENV
@@ -268,77 +267,54 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
-
           $outDir = "dist\nothing-browser-win64"
           New-Item -ItemType Directory -Force $outDir
-
           Copy-Item "build-win\Release\nothing-browser.exe" "$outDir\"
           Copy-Item "newpipe-bridge\build\libs\newpipe-bridge-1.0.0.jar" "$outDir\newpipe-bridge.jar"
-
           $javaHome = "$env:JAVA_HOME"
           Copy-Item -Recurse "$javaHome" "$outDir\jre"
-
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
-          Write-Host "windeployqt: $wdqt"
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser.exe"
-
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
           }
-
-          Compress-Archive `
-            -Path "$outDir\*" `
-            -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
+          Compress-Archive -Path "$outDir\*" -DestinationPath "dist\nothing-browser-${version}-windows-x64.zip"
 
       - name: Package nothing-browser-headless
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
-
           $outDir = "dist\nothing-browser-headless-win64"
           New-Item -ItemType Directory -Force $outDir
-
           Copy-Item "build-win\Release\nothing-browser-headless.exe" "$outDir\"
-
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headless.exe"
-
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
           }
-
-          Compress-Archive `
-            -Path "$outDir\*" `
-            -DestinationPath "dist\nothing-browser-headless-${version}-windows-x64.zip"
+          Compress-Archive -Path "$outDir\*" -DestinationPath "dist\nothing-browser-headless-${version}-windows-x64.zip"
 
       - name: Package nothing-browser-headful
         shell: powershell
         run: |
           $version = "${{ github.ref_name }}" -replace "^v", ""
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
-
           $outDir = "dist\nothing-browser-headful-win64"
           New-Item -ItemType Directory -Force $outDir
-
           Copy-Item "build-win\Release\nothing-browser-headful.exe" "$outDir\"
-
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headful.exe"
-
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
           }
-
-          Compress-Archive `
-            -Path "$outDir\*" `
-            -DestinationPath "dist\nothing-browser-headful-${version}-windows-x64.zip"
+          Compress-Archive -Path "$outDir\*" -DestinationPath "dist\nothing-browser-headful-${version}-windows-x64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -384,7 +360,6 @@ jobs:
           QT_ROOT=$(find ${{ github.workspace }}/Qt -name "macdeployqt" -type f | head -1 | xargs dirname | xargs dirname)
           echo "QT_ROOT=$QT_ROOT" >> $GITHUB_ENV
           echo "QT_BIN=$QT_ROOT/bin" >> $GITHUB_ENV
-          echo "Qt root: $QT_ROOT"
 
       - name: Build NewPipe Bridge JAR
         run: |
@@ -408,13 +383,10 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist
-
           APP="build-mac/nothing-browser.app"
-
           cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
             "${APP}/Contents/MacOS/newpipe-bridge.jar"
           cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
-
           cat > "${APP}/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -427,18 +399,15 @@ jobs:
             <key>NSHighResolutionCapable</key><true/>
           </dict></plist>
           EOF
-
           "$QT_BIN/macdeployqt" "$APP" -dmg -always-overwrite
-          mv build-mac/nothing-browser.dmg \
-            dist/nothing-browser-${VERSION}-macos.dmg
+          mv build-mac/nothing-browser.dmg dist/nothing-browser-${VERSION}-macos.dmg
 
       - name: Package nothing-browser-headless
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist/nothing-browser-headless-${VERSION}-macos
-          cp build-mac/nothing-browser-headless \
-            dist/nothing-browser-headless-${VERSION}-macos/
+          cp build-mac/nothing-browser-headless dist/nothing-browser-headless-${VERSION}-macos/
           tar -czf dist/nothing-browser-headless-${VERSION}-macos.tar.gz \
             -C dist nothing-browser-headless-${VERSION}-macos
 
@@ -447,8 +416,7 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist/nothing-browser-headful-${VERSION}-macos
-          cp build-mac/nothing-browser-headful \
-            dist/nothing-browser-headful-${VERSION}-macos/
+          cp build-mac/nothing-browser-headful dist/nothing-browser-headful-${VERSION}-macos/
           tar -czf dist/nothing-browser-headful-${VERSION}-macos.tar.gz \
             -C dist nothing-browser-headful-${VERSION}-macos
 
@@ -484,6 +452,75 @@ jobs:
         with:
           path: release-artifacts
 
+      # ── APT REPO ─────────────────────────────────────────────────────────────
+
+      - name: Install apt repo tools
+        run: sudo apt-get install -y dpkg-dev apt-utils gnupg
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "66BD57DC4092798E3CC181CB4E071E8A1CB2AB4D:6:" | gpg --import-ownertrust
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Sync existing pool from R2
+        run: |
+          mkdir -p apt-repo/pool/main apt-repo/dists/stable/main/binary-amd64
+          wrangler r2 object list nothing-browser-repo --prefix pool/main/ \
+            --json 2>/dev/null | \
+            jq -r '.[].key' | while read key; do
+              mkdir -p "apt-repo/$(dirname $key)"
+              wrangler r2 object get nothing-browser-repo/"$key" \
+                --file "apt-repo/$key" 2>/dev/null || true
+            done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      - name: Add new .debs to pool
+        run: |
+          find release-artifacts -name "*.deb" -type f | while read deb; do
+            cp "$deb" apt-repo/pool/main/
+          done
+
+      - name: Generate apt metadata
+        run: |
+          cd apt-repo
+          dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
+          gzip -k dists/stable/main/binary-amd64/Packages
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin="Ernest Tech House" \
+            -o APT::FTPArchive::Release::Label="Nothing Browser" \
+            -o APT::FTPArchive::Release::Suite="stable" \
+            -o APT::FTPArchive::Release::Codename="stable" \
+            -o APT::FTPArchive::Release::Architectures="amd64" \
+            -o APT::FTPArchive::Release::Components="main" \
+            -o APT::FTPArchive::Release::Description="Nothing Browser apt repository" \
+            release dists/stable > dists/stable/Release
+          gpg --default-key ernesttechhouse@gmail.com \
+              -abs -o dists/stable/Release.gpg dists/stable/Release
+          gpg --default-key ernesttechhouse@gmail.com \
+              --clearsign -o dists/stable/InRelease dists/stable/Release
+
+      - name: Export public key
+        run: gpg --armor --export ernesttechhouse@gmail.com > apt-repo/nothing-browser-key.gpg
+
+      - name: Upload apt repo to R2
+        run: |
+          find apt-repo -type f | while read file; do
+            KEY="${file#apt-repo/}"
+            wrangler r2 object put nothing-browser-repo/"$KEY" \
+              --file "$file" \
+              --remote
+          done
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # ── GITHUB RELEASE ────────────────────────────────────────────────────────
+
       - name: Build changelog from commits
         id: changelog
         run: |
@@ -509,6 +546,20 @@ jobs:
 
             ---
 
+            ### Install via apt (recommended)
+
+            ```sh
+            curl -fsSL https://pub-5119122a931748c3b649ad4ca5aab522.r2.dev/nothing-browser-key.gpg \
+              | sudo gpg --dearmor -o /usr/share/keyrings/nothing-browser.gpg
+
+            echo 'deb [signed-by=/usr/share/keyrings/nothing-browser.gpg] https://pub-5119122a931748c3b649ad4ca5aab522.r2.dev stable main' \
+              | sudo tee /etc/apt/sources.list.d/nothing-browser.list
+
+            sudo apt update && sudo apt install nothing-browser
+            ```
+
+            ---
+
             ### Install — Nothing Browser (full UI)
 
             **Linux (deb)**
@@ -529,8 +580,6 @@ jobs:
 
             ### Install — Nothing Browser Headless (Piggy daemon)
 
-            Used by the `nothingbrowser` scraping lib. No UI.
-
             **Linux (deb)**
 
                 sudo dpkg -i nothing-browser-headless_*_amd64.deb
@@ -547,8 +596,6 @@ jobs:
             ---
 
             ### Install — Nothing Browser Headful (script-controlled visible window)
-
-            Used by the `nothingbrowser` scraping lib when a visible window is needed.
 
             **Linux (deb)**
 
