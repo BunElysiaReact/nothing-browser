@@ -381,7 +381,7 @@ jobs:
       - name: Debug build output
         run: find build-mac -type f | head -40
 
-        - name: Package nothing-browser .dmg
+      - name: Package nothing-browser .dmg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           [ -z "$VERSION" ] && VERSION="dev"
