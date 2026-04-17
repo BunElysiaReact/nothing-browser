@@ -378,6 +378,9 @@ jobs:
       - name: Build
         run: cmake --build build-mac --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
 
+      - name: Debug build output
+        run: find build-mac -type f | head -40
+
       - name: Package nothing-browser .dmg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
