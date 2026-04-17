@@ -389,9 +389,8 @@ jobs:
           APP="build-mac/nothing-browser.app"
           mkdir -p "${APP}/Contents/MacOS"
           mkdir -p "${APP}/Contents/Resources"
-          cp build-mac/nothing-browser "${APP}/Contents/MacOS/"
-          cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
-            "${APP}/Contents/MacOS/newpipe-bridge.jar"
+          cp build-mac/nothing-browser.app/Contents/MacOS/nothing-browser "${APP}/Contents/MacOS/"
+          cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar "${APP}/Contents/MacOS/newpipe-bridge.jar"
           cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
           cat > "${APP}/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
