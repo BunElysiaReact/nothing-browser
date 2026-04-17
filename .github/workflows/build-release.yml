@@ -384,6 +384,9 @@ jobs:
           [ -z "$VERSION" ] && VERSION="dev"
           mkdir -p dist
           APP="build-mac/nothing-browser.app"
+          mkdir -p "${APP}/Contents/MacOS"
+          mkdir -p "${APP}/Contents/Resources"
+          cp build-mac/nothing-browser "${APP}/Contents/MacOS/"
           cp newpipe-bridge/build/libs/newpipe-bridge-1.0.0.jar \
             "${APP}/Contents/MacOS/newpipe-bridge.jar"
           cp -r "$JAVA_HOME" "${APP}/Contents/Runtime"
@@ -460,7 +463,10 @@ jobs:
       - name: Import GPG key
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "66BD57DC4092798E3CC181CB4E071E8A1CB2AB4D:6:" | gpg --import-ownertrust
+          KEY_FP=$(gpg --list-secret-keys --with-colons --fingerprint | awk -F: '/^fpr/{print $10; exit}')
+          echo "${KEY_FP}:6:" | gpg --import-ownertrust
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
 
       - name: Install wrangler
         run: npm install -g wrangler
@@ -468,11 +474,11 @@ jobs:
       - name: Sync existing pool from R2
         run: |
           mkdir -p apt-repo/pool/main apt-repo/dists/stable/main/binary-amd64
-          wrangler r2 object list nothing-browser-repo --prefix pool/main/ \
+          wrangler r2 object list nothing-browser --prefix pool/main/ \
             --json 2>/dev/null | \
             jq -r '.[].key' | while read key; do
               mkdir -p "apt-repo/$(dirname $key)"
-              wrangler r2 object get nothing-browser-repo/"$key" \
+              wrangler r2 object get nothing-browser/"$key" \
                 --file "apt-repo/$key" 2>/dev/null || true
             done
         env:
@@ -487,6 +493,9 @@ jobs:
 
       - name: Generate apt metadata
         run: |
+          echo "pinentry-mode loopback" >> ~/.gnupg/gpg.conf
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent
           cd apt-repo
           dpkg-scanpackages --arch amd64 pool/main > dists/stable/main/binary-amd64/Packages
           gzip -k dists/stable/main/binary-amd64/Packages
@@ -499,9 +508,11 @@ jobs:
             -o APT::FTPArchive::Release::Components="main" \
             -o APT::FTPArchive::Release::Description="Nothing Browser apt repository" \
             release dists/stable > dists/stable/Release
-          gpg --default-key ernesttechhouse@gmail.com \
+          gpg --batch --yes --pinentry-mode loopback \
+              --default-key ernesttechhouse@gmail.com \
               -abs -o dists/stable/Release.gpg dists/stable/Release
-          gpg --default-key ernesttechhouse@gmail.com \
+          gpg --batch --yes --pinentry-mode loopback \
+              --default-key ernesttechhouse@gmail.com \
               --clearsign -o dists/stable/InRelease dists/stable/Release
 
       - name: Export public key
@@ -511,7 +522,7 @@ jobs:
         run: |
           find apt-repo -type f | while read file; do
             KEY="${file#apt-repo/}"
-            wrangler r2 object put nothing-browser-repo/"$KEY" \
+            wrangler r2 object put nothing-browser/"$KEY" \
               --file "$file" \
               --remote
           done
