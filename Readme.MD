@@ -1,14 +1,23 @@
+
 # Nothing Browser
 
 > **Does nothing... except everything that matters.**
 
-A scrapper-first browser built on Qt6 + Chromium WebEngine. Designed for API reverse engineering, web scraping, automation research, and people who hate black boxes.
+A scraper-first browser built on Qt6 + Chromium WebEngine. Designed for API reverse engineering, web scraping, automation research, and people who hate black boxes.
+
+---
+
+## 📚 Documentation
+
+**[https://nothing-browser-docs.pages.dev/guide/nothing-browser/](https://nothing-browser-docs.pages.dev/guide/nothing-browser/)**
+
+Full documentation including installation, DevTools, network capture, WebSocket inspector, and plugin system.
 
 ---
 
 ## What it is
 
-Most browsers are built to hide the web from you. Nothing Browser is built to expose it.
+Most browsers are built to hide the web from you. Nothing Browser is built to **expose it**.
 
 Every request, response, WebSocket frame, cookie, and storage write is captured in real time — visible, inspectable, copyable, and downloadable. One click exports any captured request to Python, cURL, JavaScript, or raw HTTP.
 
@@ -38,6 +47,8 @@ Every request, response, WebSocket frame, cookie, and storage write is captured 
 - **Fingerprint spoofing** — randomised Chrome UA, hardware concurrency, device memory, screen res, WebGL vendor at engine level
 - **Zero telemetry** — no analytics, no phoning home, nothing stored after session ends
 - **Auto-update** — checks GitHub Releases on launch and every 6 hours, downloads and installs updates in-app with one click
+- **Plugin system** — community JS plugins installed from inside the browser
+- **YouTube tab** — YouTube client without API keys (via NewPipe Extractor)
 
 ---
 
@@ -82,6 +93,32 @@ Download the `.zip` from [Releases](https://github.com/BunElysiaReact/nothing-br
 
 ---
 
+## Quick Start (Piggy Library)
+
+The `nothing-browser` npm package lets you control the browser from TypeScript/Bun:
+
+```ts
+import piggy from "nothing-browser";
+
+await piggy.launch({ mode: "tab" });
+await piggy.register("books", "https://books.toscrape.com");
+
+await piggy.books.navigate();
+const books = await piggy.books.evaluate(() =>
+  Array.from(document.querySelectorAll(".product_pod")).map(el => ({
+    title: el.querySelector("h3 a")?.getAttribute("title") ?? "",
+    price: el.querySelector(".price_color")?.textContent?.trim() ?? "",
+  }))
+);
+
+console.log(books);
+await piggy.close();
+```
+
+> **Full Piggy documentation:** [nothing-browser-docs.pages.dev/guide/piggy/quickstart](https://nothing-browser-docs.pages.dev/guide/piggy/quickstart)
+
+---
+
 ## Build from source
 
 ### Requirements
@@ -122,7 +159,7 @@ nothing-browser/
 │   ├── engine/               # Interceptor, FingerprintSpoofer,
 │   │                         # NetworkCapture, UpdateChecker
 │   ├── tabs/                 # BrowserTab, DevToolsPanel,
-│   │                         # NewsTab, YoutubeTab
+│   │                         # NewsTab, YoutubeTab, PluginsTab
 │   └── main.cpp
 ├── assets/
 │   └── icons/logo.svg
@@ -152,8 +189,8 @@ To ship a new release:
 git add .
 git commit -m "feat: what changed"
 git push
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.9
+git push origin v0.1.9
 ```
 
 GitHub Actions builds Linux, Windows, and macOS automatically and publishes the release with all assets attached.
@@ -166,11 +203,14 @@ GitHub Actions builds Linux, Windows, and macOS automatically and publishes the 
 |---------|--------|------|
 | v0.1.0  | ✅ Done  | Core browser + full DevTools scrapper panel |
 | v0.1.1  | ✅ Done  | Auto-update system, YouTube loop, UI improvements |
-| v0.2.0  | 🔨 Next  | Windows support, response body search |
-| v0.3.0  | Planned  | Built-in captcha solver (reCAPTCHA / hCaptcha) |
-| v0.4.0  | Planned  | Script marketplace + headless mode |
-| v0.5.0  | Planned  | Multi-tab, session profiles, proxy manager |
-| v1.0.0  | Planned  | Stable release, open-source UI layer |
+| v0.1.2  | ✅ Done  | Plugin system, community registry |
+| v0.1.3  | ✅ Done  | Fingerprint improvements, xorshift canvas noise |
+| v0.1.9  | ✅ Latest | Windows support, bug fixes |
+| v0.2.0  | 🔨 Next  | Response body search, identity reset UI |
+| v0.3.0  | 📋 Planned | Built-in captcha solver (reCAPTCHA / hCaptcha) |
+| v0.4.0  | 📋 Planned | Script marketplace + headless mode |
+| v0.5.0  | 📋 Planned | Multi-tab, session profiles, proxy manager |
+| v1.0.0  | 📋 Planned | Stable release, open-source UI layer |
 
 ---
 
@@ -184,12 +224,32 @@ GitHub Actions builds Linux, Windows, and macOS automatically and publishes the 
 
 ---
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Contributing Guide](https://nothing-browser-docs.pages.dev/guide/community/contributing).
+
+**Quick rules:**
+- ❌ Don't touch `fingerprintspoofer.cpp`, `identitygenerator.cpp`, or `interceptor.cpp`
+- ❌ Don't add settings to Private Browser
+- ✅ UI changes (curved tabs, icons, fonts) are welcome
+- ✅ Bug fixes are welcome
+
+---
+
+## Security
+
+Report security vulnerabilities to **ernesttechhouse@gmail.com** — do NOT open a public issue.
+
+See [SECURITY.md](SECURITY.md) for details.
+
+---
+
 ## Built with
 
 - [Qt6 WebEngine](https://doc.qt.io/qt-6/qtwebengine-index.html) — Chromium-based browser engine
 - [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) — YouTube data without the API
-- [Bun](https://bun.sh) — powers the SCRAPPER side project
-- [Elysia.js](https://elysiajs.com) — API layer for the scrapper server
+- [Bun](https://bun.sh) — powers the Piggy library
+- [Elysia.js](https://elysiajs.com) — API layer for the scraper server
 
 ---
 
@@ -199,4 +259,14 @@ MIT — use it, build on it, sell scripts with it. Just don't blame us when Face
 
 ---
 
-*Part of the [BunElysiaReact](https://github.com/BunElysiaReact) ecosystem.*
+## Links
+
+- 📚 **Documentation:** [nothing-browser-docs.pages.dev](https://nothing-browser-docs.pages.dev)
+- 📦 **npm package:** [nothing-browser](https://www.npmjs.com/package/nothing-browser)
+- 🐙 **GitHub:** [BunElysiaReact/nothing-browser](https://github.com/BunElysiaReact/nothing-browser)
+- 💬 **Discord:** [Join server](https://discord.gg/TUxBVQ7y)
+- 📱 **WhatsApp Channel:** [Ernest Tech House](https://whatsapp.com/channel/0029VbBzoXuCxoArtvaslR0U)
+
+---
+
+*Part of the [Nothing Ecosystem](https://nothing-browser-docs.pages.dev). Built in Kenya 🇰🇪*
