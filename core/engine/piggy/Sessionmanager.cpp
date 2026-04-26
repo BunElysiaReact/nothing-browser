@@ -1,4 +1,4 @@
-#include "SessionManager.h"
+#include "Sessionmanager.h"
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QFile>

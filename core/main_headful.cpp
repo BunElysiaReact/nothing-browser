@@ -10,7 +10,7 @@
 #include <QWidget>
 #include <QPushButton>
 #include <QMap>
-#include "engine/PiggyServer.h"
+#include "../engine/piggy/PiggyServer.h"
 #include "engine/FingerprintSpoofer.h"
 #include "engine/NetworkCapture.h"
 

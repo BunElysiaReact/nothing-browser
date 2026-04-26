@@ -35,6 +35,7 @@ set(PIGGY_SOURCES
     core/engine/piggy/PiggyExport.cpp          # session, cookies, intercept, expose, fetch.*
     core/engine/piggy/PiggyMedia.cpp           # screenshot, pdf, image blocking
     core/engine/piggy/PiggyProxy.cpp           # all proxy.* commands + event wiring
+    core/engine/piggy/PiggyHttp.cpp
 )
 
 # ── Other shared sources ──────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ set(SHARED_SOURCES
     core/engine/ProxyManager.cpp
     core/tabs/PiggyTab.cpp
     ${PIGGY_SOURCES}
-    core/engine/piggy/SessionManager.cpp   # ← new
+    core/engine/piggy/Sessionmanager.cpp   # ← new
 )
 
 

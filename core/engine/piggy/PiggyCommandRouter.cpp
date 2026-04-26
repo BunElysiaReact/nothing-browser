@@ -2,6 +2,8 @@
 #include "PiggyProxy.h"
 #include <QJsonObject>
 #include <QLocalSocket>
+#include <QJsonArray>
+#include <QJsonDocument>
 
 // ─── Forward declarations from split files ────────────────────────────────────
 bool piggy_handleNavigation(PiggyServer *srv, const QString &c,

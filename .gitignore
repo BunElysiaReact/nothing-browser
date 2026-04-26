@@ -9,7 +9,7 @@ out/
 *.exe
 *.app
 nothing-browser
-
+dump.txt
 # ── CMake ─────────────────────────────────────────────────────────────────────
 CMakeCache.txt
 CMakeFiles/

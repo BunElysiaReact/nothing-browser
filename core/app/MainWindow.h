@@ -14,7 +14,7 @@
 #include "../engine/UpdateChecker.h"
 #include "../tabs/PluginsTab.h"
 #include "../tabs/PiggyTab.h"
-#include "PiggyServer.h"
+#include "../engine/piggy/PiggyServer.h"
 
 class BrowserTab;
 class YoutubeTab;

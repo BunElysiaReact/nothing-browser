@@ -10,7 +10,7 @@
 #include <QNetworkCookie>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include "SessionManager.h
+#include "Sessionmanager.h"
 
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 

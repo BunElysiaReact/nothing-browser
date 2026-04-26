@@ -2,6 +2,7 @@
 #include <QObject>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QTcpSocket>
 #include <QJsonObject>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
@@ -14,14 +15,11 @@
 #include <QUuid>
 #include <QDir>
 #include <QSet>
+#include "../NetworkCapture.h"
 
 class PiggyTab;
-class NetworkCapture;
 class Interceptor;
 class SessionManager;
-struct CapturedRequest;
-struct WebSocketFrame;
-struct CapturedCookie;
 
 struct InterceptRule {
     QString urlPattern;
@@ -56,19 +54,22 @@ public:
 
     void start();
     void stop();
+    void startHttp(const QString &apiKey);
 
-    // ── Accessors for split files ──────────────────────────────────────────────
-    QMap<QString, TabContext>  &tabs()           { return m_tabs; }
-    QList<QLocalSocket*>       &clients()        { return m_clients; }
-    PiggyTab                   *piggy()          { return m_piggy; }
-    QWebEnginePage             *headfulPage()    { return m_headfulPage; }
-    QWebEngineProfile          *ownProfile()     { return m_ownProfile; }
-    QWebEnginePage             *ownPage()        { return m_ownPage; }
-    SessionManager             *session()        { return m_session; }
+    QMap<QString, TabContext>  &tabs()        { return m_tabs; }
+    QList<QLocalSocket*>       &clients()     { return m_clients; }
+    PiggyTab                   *piggy()       { return m_piggy; }
+    QWebEnginePage             *headfulPage() { return m_headfulPage; }
+    QWebEngineProfile          *ownProfile()  { return m_ownProfile; }
+    QWebEnginePage             *ownPage()     { return m_ownPage; }
+    SessionManager             *session()     { return m_session; }
 
-    // ── Core helpers ───────────────────────────────────────────────────────────
     void respond(QLocalSocket *client, const QString &id,
                  bool ok, const QVariant &data = QVariant());
+
+    void handleHttpCommand(const QJsonObject &cmd, QTcpSocket *sock);
+    void respondHttp(QTcpSocket *sock, const QString &id,
+                     bool ok, const QVariant &data = QVariant());
 
     QWebEnginePage* page(const QString &tabId = QString());
     QString         createTab();
@@ -80,11 +81,7 @@ signals:
     void tabCreated(const QString &tabId, QWebEnginePage *page);
     void tabClosed(const QString &tabId);
 
-private slots:
-    void onNewConnection();
-    void onClientData();
-    void onClientDisconnected();
-
+public slots:
     void onRequestCaptured(const CapturedRequest &req, const QString &tabId);
     void onWsFrameCaptured(const WebSocketFrame &frame, const QString &tabId);
     void onCookieCaptured(const CapturedCookie &cookie, const QString &tabId);
@@ -95,15 +92,22 @@ private slots:
     void onExposedFunctionCalled(const QString &name, const QString &callId,
                                  const QString &data, const QString &tabId);
 
+private slots:
+    void onNewConnection();
+    void onClientData();
+    void onClientDisconnected();
+
 private:
     void handleCommand(const QJsonObject &cmd, QLocalSocket *client);
 
-    PiggyTab          *m_piggy        = nullptr;
-    QWebEnginePage    *m_headfulPage  = nullptr;
-    QLocalServer      *m_server       = nullptr;
-    QWebEngineProfile *m_ownProfile   = nullptr;
-    QWebEnginePage    *m_ownPage      = nullptr;
-    SessionManager    *m_session      = nullptr;   // ← new
+    PiggyTab          *m_piggy           = nullptr;
+    QWebEnginePage    *m_headfulPage     = nullptr;
+    QLocalServer      *m_server          = nullptr;
+    QWebEngineProfile *m_ownProfile      = nullptr;
+    QWebEnginePage    *m_ownPage         = nullptr;
+    SessionManager    *m_session         = nullptr;
+    QString            m_apiKey;
+    QTcpSocket        *m_pendingHttpSock = nullptr;
 
     QMap<QString, TabContext> m_tabs;
     QList<QLocalSocket*>      m_clients;

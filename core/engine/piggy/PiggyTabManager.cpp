@@ -10,6 +10,7 @@
 #include <QWebEngineScriptCollection>
 #include <QDir>
 #include <QSet>
+#include <QJsonDocument>
 #include <QUuid>
 
 // ─── Profile configuration ────────────────────────────────────────────────────
