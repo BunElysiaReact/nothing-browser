@@ -18,7 +18,42 @@
 #include "engine/piggy/PiggyServer.h"
 #include "engine/piggy/Sessionmanager.h"
 #include "engine/FingerprintSpoofer.h"
+#include "engine/IdentityGenerator.h"
 #include "engine/NetworkCapture.h"
+
+// ── cwd-local identity ────────────────────────────────────────────────────────
+// Normal browser  → ~/.config/nothing-browser/identity.json  (IdentityStore)
+// Headless/Headful→ <cwd>/identity.json                      (here)
+
+static QString cwdIdentityPath() {
+    return SessionManager::workDir() + "/identity.json";
+}
+
+static BrowserIdentity loadOrGenerateCwdIdentity() {
+    QString path = cwdIdentityPath();
+    if (QFile::exists(path)) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            if (doc.isObject()) {
+                BrowserIdentity id = BrowserIdentity::fromJson(doc.object());
+                if (id.isValid()) {
+                    qInfo() << "[Identity] Loaded from" << path;
+                    return id;
+                }
+            }
+        }
+    }
+    BrowserIdentity id = IdentityGenerator::generate();
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(id.toJson()).toJson(QJsonDocument::Indented));
+        qInfo() << "[Identity] Generated and saved to" << path;
+    }
+    return id;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class HeadfulWindow : public QMainWindow {
     Q_OBJECT
@@ -99,9 +134,10 @@ private slots:
     }
 
     void onNewTabClicked() {
-        auto *profile = new QWebEngineProfile(this);
-        profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
-        profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+        // Reuse the same profile so new tabs inherit spoof + capture scripts
+        QWebEngineProfile *profile =
+            m_server->headfulPage() ? m_server->headfulPage()->profile() : nullptr;
+        if (!profile) return;
         auto *pg = new QWebEnginePage(profile, this);
         pg->load(QUrl("about:blank"));
         addPageAsTab(pg, "New Tab");
@@ -159,7 +195,7 @@ private:
     QMap<QString, QWebEnginePage*>  m_tabIdToPage;
 };
 
-// ─── Key helpers — identical to headless, both use cwd ───────────────────────
+// ─── Key helpers ──────────────────────────────────────────────────────────────
 
 static QString generateKey() {
     QString a = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
@@ -168,7 +204,6 @@ static QString generateKey() {
 }
 
 static QString keyFilePath(const QString &name) {
-    // Lives in cwd — same folder as cookies.json / profile.json
     return SessionManager::workDir() + "/" + name + ".piggy";
 }
 
@@ -211,22 +246,30 @@ int main(int argc, char *argv[]) {
     dark.setColor(QPalette::HighlightedText, QColor(255,255,255));
     app.setPalette(dark);
 
-    // ── shared profile ────────────────────────────────────────────────────────
+    // ── Load cwd identity and push into spoofer ───────────────────────────────
+    BrowserIdentity id = loadOrGenerateCwdIdentity();
+    FingerprintSpoofer::instance().loadIdentity(id);
+
+    qInfo() << "[HeadfulPiggy] UA :" << id.userAgent;
+    qInfo() << "[HeadfulPiggy] GPU:" << id.gpuRenderer;
+    qInfo() << "[HeadfulPiggy] Identity:" << cwdIdentityPath();
+
+    // ── Shared profile ────────────────────────────────────────────────────────
     auto *profile = new QWebEngineProfile(&app);
     profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
     profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+    profile->setHttpUserAgent(id.userAgent);
 
-    auto &spoofer = FingerprintSpoofer::instance();
-    profile->setHttpUserAgent(spoofer.identity().userAgent);
-
+    // ── Inject fingerprint spoof script ───────────────────────────────────────
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
-    spoofScript.setSourceCode(spoofer.injectionScript());
+    spoofScript.setSourceCode(FingerprintSpoofer::instance().injectionScript());
     spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
+    // ── Inject network capture script ─────────────────────────────────────────
     QWebEngineScript capScript;
     capScript.setName("nothing_capture");
     capScript.setSourceCode(NetworkCapture::captureScript());
@@ -235,7 +278,7 @@ int main(int argc, char *argv[]) {
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);
 
-    // ── default page ──────────────────────────────────────────────────────────
+    // ── Default page ──────────────────────────────────────────────────────────
     auto *defaultPage = new QWebEnginePage(profile, &app);
     defaultPage->setHtml(R"HTML(
 <!DOCTYPE html><html>
@@ -258,19 +301,16 @@ int main(int argc, char *argv[]) {
 </html>
 )HTML");
 
-    // ── server ────────────────────────────────────────────────────────────────
+    // ── Server ────────────────────────────────────────────────────────────────
     auto *server = new PiggyServer(defaultPage, &app);
     server->start();
 
-    // ── HTTP mode if a .piggy key file exists in cwd ──────────────────────────
     auto [name, key] = loadExistingKey();
     if (!key.isEmpty()) {
         server->startHttp(key);
         qInfo() << "[HeadfulPiggy] HTTP API ready on port 2005, session:" << name;
     } else {
         qInfo() << "[HeadfulPiggy] Socket mode — no .piggy key file in cwd";
-        qInfo() << "[HeadfulPiggy] To use HTTP mode, run headless first to generate a key,";
-        qInfo() << "               or create <name>.piggy manually in:" << SessionManager::workDir();
     }
 
     qInfo() << "[HeadfulPiggy] Working dir:" << SessionManager::workDir();

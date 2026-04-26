@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
+#include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
 #include <QTextStream>
 #include <QFile>
 #include <QDir>
@@ -11,8 +13,44 @@
 #include <QCoreApplication>
 #include "engine/piggy/PiggyServer.h"
 #include "engine/piggy/Sessionmanager.h"
+#include "engine/FingerprintSpoofer.h"
+#include "engine/IdentityGenerator.h"
+#include "engine/NetworkCapture.h"
 
-// ── Key generation ────────────────────────────────────────────────────────────
+// ── cwd-local identity ────────────────────────────────────────────────────────
+// Normal browser  → ~/.config/nothing-browser/identity.json  (IdentityStore)
+// Headless/Headful→ <cwd>/identity.json                      (here)
+// Each project directory gets its own persistent identity.
+
+static QString cwdIdentityPath() {
+    return SessionManager::workDir() + "/identity.json";
+}
+
+static BrowserIdentity loadOrGenerateCwdIdentity() {
+    QString path = cwdIdentityPath();
+    if (QFile::exists(path)) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            if (doc.isObject()) {
+                BrowserIdentity id = BrowserIdentity::fromJson(doc.object());
+                if (id.isValid()) {
+                    qInfo() << "[Identity] Loaded from" << path;
+                    return id;
+                }
+            }
+        }
+    }
+    BrowserIdentity id = IdentityGenerator::generate();
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(id.toJson()).toJson(QJsonDocument::Indented));
+        qInfo() << "[Identity] Generated and saved to" << path;
+    }
+    return id;
+}
+
+// ── Key helpers ───────────────────────────────────────────────────────────────
 
 static QString generateKey() {
     QString a = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
@@ -20,7 +58,6 @@ static QString generateKey() {
     return "peaseernest" + (a + b).left(53);
 }
 
-// Key file lives in cwd, not in binary dir, so each project gets its own key.
 static QString keyFilePath(const QString &name) {
     return SessionManager::workDir() + "/" + name + ".piggy";
 }
@@ -52,7 +89,7 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "Mode? (socket/http): ";
     out.flush();
     QString mode = in.readLine().trimmed().toLower();
-    if (mode != "http" && mode != "socket") { mode = "socket"; }
+    if (mode != "http" && mode != "socket") mode = "socket";
 
     if (mode == "socket") {
         out << "\n[Piggy] Starting in socket mode...\n";
@@ -83,8 +120,9 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "  Key     : " << key  << "\n";
     out << "  Saved to: " << path << "\n\n";
     out << "  Data files will be in: " << SessionManager::workDir() << "\n";
-    out << "    cookies.json  — persistent cookies (always on)\n";
-    out << "    profile.json  — browser identity (always on)\n";
+    out << "    identity.json — browser fingerprint identity\n";
+    out << "    cookies.json  — persistent cookies\n";
+    out << "    profile.json  — browser settings\n";
     out << "    ws.json       — WebSocket frames (opt-in)\n";
     out << "    pings.json    — ping log (opt-in)\n\n";
     out.flush();
@@ -111,11 +149,8 @@ int main(int argc, char *argv[]) {
 
     QString mode, name, key;
     auto [ename, ekey] = loadExistingKey();
-
     if (!ekey.isEmpty()) {
-        mode = "http";
-        name = ename;
-        key  = ekey;
+        mode = "http"; name = ename; key = ekey;
         qInfo() << "[Piggy] Session:" << name;
         qInfo() << "[Piggy] Working dir:" << SessionManager::workDir();
         qInfo() << "[Piggy] HTTP mode — port 2005";
@@ -124,9 +159,37 @@ int main(int argc, char *argv[]) {
         mode = m; name = n; key = k;
     }
 
+    // ── Load cwd identity and push into spoofer ───────────────────────────────
+    BrowserIdentity id = loadOrGenerateCwdIdentity();
+    FingerprintSpoofer::instance().loadIdentity(id);
+
+    qInfo() << "[Piggy] UA :" << id.userAgent;
+    qInfo() << "[Piggy] GPU:" << id.gpuRenderer;
+
+    // ── Profile ───────────────────────────────────────────────────────────────
     auto *profile = new QWebEngineProfile(&app);
     profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
     profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+    profile->setHttpUserAgent(id.userAgent);
+
+    // ── Inject fingerprint spoof script ───────────────────────────────────────
+    QWebEngineScript spoofScript;
+    spoofScript.setName("nothing_fingerprint");
+    spoofScript.setSourceCode(FingerprintSpoofer::instance().injectionScript());
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    spoofScript.setWorldId(QWebEngineScript::MainWorld);
+    spoofScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(spoofScript);
+
+    // ── Inject network capture script ─────────────────────────────────────────
+    QWebEngineScript capScript;
+    capScript.setName("nothing_capture");
+    capScript.setSourceCode(NetworkCapture::captureScript());
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    capScript.setWorldId(QWebEngineScript::MainWorld);
+    capScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(capScript);
+
     auto *defaultPage = new QWebEnginePage(profile, &app);
 
     PiggyServer server(defaultPage, &app);
