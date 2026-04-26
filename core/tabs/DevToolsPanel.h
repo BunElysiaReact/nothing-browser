@@ -12,16 +12,14 @@
 #include <QMap>
 #include <QDir>
 #include <QRegularExpression>
+#include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
+#include <QProcess>
 #include "NetworkCapture.h"
+#include "WelcomeScreen.h"
 
-// ── Welcome / T&C splash ──────────────────────────────────────────────────────
-class WelcomeScreen : public QWidget {
-    Q_OBJECT
-public:
-    explicit WelcomeScreen(QWidget *parent = nullptr);
-signals:
-    void accepted();
-};
+class ProxyPanel;
 
 // ── Main DevTools panel ───────────────────────────────────────────────────────
 class DevToolsPanel : public QWidget {
@@ -54,7 +52,8 @@ private slots:
     void downloadSelected();
 
 private:
-    QTabWidget *m_tabs;
+    QTabWidget  *m_tabs;
+    ProxyPanel  *m_proxyPanel = nullptr;
 
     // Network
     QWidget      *buildNetworkTab();
@@ -97,12 +96,11 @@ private:
     QTextEdit *m_exportArea;
     QComboBox *m_exportFormat;
 
-    // Data
     struct NetEntry {
         QString method, url, status, type, mime;
-        QString body;          // request body (sent with request)
+        QString body;
         QString reqHeaders, resHeaders;
-        QString responseBody;  // response body (received from server)
+        QString responseBody;
     };
     struct CookieEntry {
         CapturedCookie cookie;
@@ -116,13 +114,11 @@ private:
     QString               m_lastSessionPath;
     QString               m_currentUrl;
 
-    // Helpers
     void    updateTabLabel(int idx, const QString &name, int count);
     QString buildHeadersBlock(const NetEntry &e) const;
     QString buildSummaryBlock(const NetEntry &e) const;
     QString buildRaw(const NetEntry &e) const;
 
-    // cookieStr is optional — pass pre-built "name=val; name2=val2" string
     QString generatePython(const QString &method, const QString &url,
                            const QString &headers, const QString &body = {},
                            const QString &cookies = {});
@@ -132,7 +128,6 @@ private:
     QString generateJS(const QString &method, const QString &url,
                        const QString &headers, const QString &body = {});
 
-    // Build cookie string for a given request URL from captured cookies
     QString cookiesForUrl(const QString &url) const;
 
     static void clip(const QString &text);

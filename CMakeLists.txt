@@ -8,6 +8,25 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
 find_package(OpenSSL REQUIRED)
 
+# ── Headers that contain Q_OBJECT — AUTOMOC must see these explicitly ─────────
+# When a class is split across multiple .cpp files, AUTOMOC won't discover the
+# header automatically. Listing them here forces MOC to process them and
+# generate the required vtable / staticMetaObject / signal glue code.
+set(MOC_HEADERS
+    core/app/MainWindow.h
+    core/tabs/DevToolsPanel.h
+    core/tabs/WelcomeScreen.h
+    core/tabs/BrowserTab.h
+    core/tabs/ProxyPanel.h
+    core/tabs/YoutubeTab.h
+    core/tabs/NewsTab.h
+    core/tabs/PluginsTab.h
+    core/tabs/PiggyTab.h
+    core/engine/UpdateChecker.h
+    core/engine/NetworkCapture.h
+    core/engine/PluginManager.h
+)
+
 # ── Shared sources ────────────────────────────────────────────────────────────
 set(SHARED_SOURCES
     core/engine/PiggyServer.cpp
@@ -16,7 +35,18 @@ set(SHARED_SOURCES
     core/engine/IdentityGenerator.cpp
     core/engine/IdentityStore.cpp
     core/engine/Interceptor.cpp
+    core/engine/ProxyManager.cpp
     core/tabs/PiggyTab.cpp
+)
+
+# ── DevToolsPanel — split into logical chunks ─────────────────────────────────
+set(DEVTOOLS_SOURCES
+    core/tabs/DevToolsPanel_WelcomeScreen.cpp
+    core/tabs/DevToolsPanel_Helpers.cpp
+    core/tabs/DevToolsPanel_Constructor.cpp
+    core/tabs/DevToolsPanel_DataIngestion.cpp
+    core/tabs/DevToolsPanel_RowSelection.cpp
+    core/tabs/DevToolsPanel_Actions.cpp
 )
 
 # ── Full browser ──────────────────────────────────────────────────────────────
@@ -24,14 +54,16 @@ add_executable(nothing-browser
     core/main.cpp
     core/app/MainWindow.cpp
     core/tabs/BrowserTab.cpp
-    core/tabs/DevToolsPanel.cpp
+    core/tabs/ProxyPanel.cpp
     core/tabs/YoutubeTab.cpp
     core/tabs/NewsTab.cpp
     core/engine/UpdateChecker.cpp
     core/engine/PluginManager.cpp
     core/tabs/PluginsTab.cpp
     assets/resources.qrc
+    ${DEVTOOLS_SOURCES}
     ${SHARED_SOURCES}
+    ${MOC_HEADERS}          # ← forces AUTOMOC to process every Q_OBJECT header
 )
 
 # ── Headless binary ───────────────────────────────────────────────────────────
@@ -47,12 +79,9 @@ add_executable(nothing-browser-headful
 )
 
 # ── macOS bundle settings ─────────────────────────────────────────────────────
-set_target_properties(nothing-browser PROPERTIES
-    MACOSX_BUNDLE ON)
-set_target_properties(nothing-browser-headless PROPERTIES
-    MACOSX_BUNDLE OFF)
-set_target_properties(nothing-browser-headful PROPERTIES
-    MACOSX_BUNDLE OFF)
+set_target_properties(nothing-browser          PROPERTIES MACOSX_BUNDLE ON)
+set_target_properties(nothing-browser-headless PROPERTIES MACOSX_BUNDLE OFF)
+set_target_properties(nothing-browser-headful  PROPERTIES MACOSX_BUNDLE OFF)
 
 # ── Common libs ───────────────────────────────────────────────────────────────
 set(COMMON_LIBS
@@ -69,8 +98,7 @@ set(COMMON_LIBS
 
 # ── Include dirs ──────────────────────────────────────────────────────────────
 set(COMMON_INCLUDES core core/app core/tabs core/engine core/bridge)
-
-target_include_directories(nothing-browser         PRIVATE ${COMMON_INCLUDES})
+target_include_directories(nothing-browser          PRIVATE ${COMMON_INCLUDES})
 target_include_directories(nothing-browser-headless PRIVATE ${COMMON_INCLUDES})
 target_include_directories(nothing-browser-headful  PRIVATE ${COMMON_INCLUDES})
 
