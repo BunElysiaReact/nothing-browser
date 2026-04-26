@@ -1,8 +1,4 @@
-// ── Only the constructor changes — everything else stays identical ────────────
-// Replace the two PiggyServer constructors in PiggyServer.cpp with these:
-
 #include "PiggyServer.h"
-#include "SessionManager.h"
 #include "../../tabs/PiggyTab.h"
 #include "../NetworkCapture.h"
 #include "../Interceptor.h"
@@ -13,6 +9,7 @@
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 
+// Forward declarations for split files
 void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket *client);
 QString piggy_createTab(PiggyServer *srv);
 void    piggy_closeTab(PiggyServer *srv, const QString &tabId);
@@ -20,7 +17,7 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 void    piggy_configureProfile(QWebEngineProfile *profile);
 void    piggy_wireProxyEvents(PiggyServer *srv);
 
-// ─── headful (PiggyTab UI) constructor ───────────────────────────────────────
+// ─── Constructors ─────────────────────────────────────────────────────────────
 
 PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     : QObject(parent), m_piggy(piggy)
@@ -30,33 +27,24 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
         piggy_configureProfile(m_ownProfile);
         m_ownPage = new QWebEnginePage(m_ownProfile, this);
     }
-
-    // SessionManager uses whichever profile is active
-    QWebEngineProfile *profile = m_piggy ? m_piggy->getPage()->profile() : m_ownProfile;
-    m_session = new SessionManager(profile, this);
-    m_session->load(); // reads cookies.json + profile.json from binary dir
-
     piggy_wireProxyEvents(this);
 }
-
-// ─── headful window (bare page) constructor ───────────────────────────────────
 
 PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
     : QObject(parent), m_piggy(nullptr), m_headfulPage(page)
 {
-    m_session = new SessionManager(page->profile(), this);
-    m_session->load();
-
     piggy_wireProxyEvents(this);
 }
 
 PiggyServer::~PiggyServer() { stop(); }
 
-// ── Everything below is UNCHANGED from PiggyServer.cpp ───────────────────────
+// ─── Public wrappers (delegate to split files) ────────────────────────────────
 
 QString PiggyServer::createTab()                        { return piggy_createTab(this); }
 void    PiggyServer::closeTab(const QString &id)        { piggy_closeTab(this, id); }
 QWebEnginePage* PiggyServer::page(const QString &tabId) { return piggy_page(this, tabId); }
+
+// ─── Server lifecycle ────────────────────────────────────────────────────────
 
 void PiggyServer::start() {
     QLocalServer::removeServer(SOCKET_NAME);
@@ -80,12 +68,16 @@ void PiggyServer::stop() {
     m_tabs.clear();
 }
 
+// ─── Connection handling ──────────────────────────────────────────────────────
+
 void PiggyServer::onNewConnection() {
     while (m_server->hasPendingConnections()) {
         auto *client = m_server->nextPendingConnection();
         m_clients.append(client);
-        connect(client, &QLocalSocket::readyRead,   this, &PiggyServer::onClientData);
-        connect(client, &QLocalSocket::disconnected,this, &PiggyServer::onClientDisconnected);
+        connect(client, &QLocalSocket::readyRead,
+                this, &PiggyServer::onClientData);
+        connect(client, &QLocalSocket::disconnected,
+                this, &PiggyServer::onClientDisconnected);
         qDebug() << "[PiggyServer] Client connected";
     }
 }
@@ -111,6 +103,8 @@ void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
     piggy_handleCommand(this, cmd, client);
 }
 
+// ─── respond() ───────────────────────────────────────────────────────────────
+
 void PiggyServer::respond(QLocalSocket *client, const QString &id,
                            bool ok, const QVariant &data) {
     if (!client || client->state() != QLocalSocket::ConnectedState) return;
@@ -133,22 +127,30 @@ void PiggyServer::respond(QLocalSocket *client, const QString &id,
     client->flush();
 }
 
+// ─── Capture signal slots (delegate to PiggyCapture.cpp) ─────────────────────
+
 void PiggyServer::onRequestCaptured(const CapturedRequest &req, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    if (m_tabs[tabId].captureActive) m_tabs[tabId].capturedRequests.append(req);
+    if (m_tabs[tabId].captureActive)
+        m_tabs[tabId].capturedRequests.append(req);
 }
+
 void PiggyServer::onWsFrameCaptured(const WebSocketFrame &frame, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    if (m_tabs[tabId].captureActive) m_tabs[tabId].capturedWsFrames.append(frame);
+    if (m_tabs[tabId].captureActive)
+        m_tabs[tabId].capturedWsFrames.append(frame);
 }
+
 void PiggyServer::onCookieCaptured(const CapturedCookie &cookie, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
     m_tabs[tabId].capturedCookies.append(cookie);
 }
+
 void PiggyServer::onCookieRemoved(const QString &name, const QString &domain,
                                    const QString &tabId) {
     Q_UNUSED(name); Q_UNUSED(domain); Q_UNUSED(tabId);
 }
+
 void PiggyServer::onStorageCaptured(const QString &origin, const QString &key,
                                      const QString &value, const QString &storageType,
                                      const QString &tabId) {
@@ -156,6 +158,7 @@ void PiggyServer::onStorageCaptured(const QString &origin, const QString &key,
     if (m_tabs[tabId].captureActive)
         m_tabs[tabId].storageEntries.append({storageType+":"+origin+":"+key, value});
 }
+
 void PiggyServer::onExposedFunctionCalled(const QString &name, const QString &callId,
                                            const QString &data, const QString &tabId) {
     QJsonObject event;
@@ -165,6 +168,7 @@ void PiggyServer::onExposedFunctionCalled(const QString &name, const QString &ca
     event["name"]   = name;
     event["callId"] = callId;
     event["data"]   = data;
+
     QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
     for (auto *client : m_clients) {
         if (client && client->state() == QLocalSocket::ConnectedState)

@@ -8,10 +8,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
 find_package(OpenSSL REQUIRED)
 
-# ── Headers that contain Q_OBJECT — AUTOMOC must see these explicitly ─────────
-# When a class is split across multiple .cpp files, AUTOMOC won't discover the
-# header automatically. Listing them here forces MOC to process them and
-# generate the required vtable / staticMetaObject / signal glue code.
+# ── Headers that contain Q_OBJECT ────────────────────────────────────────────
 set(MOC_HEADERS
     core/app/MainWindow.h
     core/tabs/DevToolsPanel.h
@@ -27,9 +24,22 @@ set(MOC_HEADERS
     core/engine/PluginManager.h
 )
 
-# ── Shared sources ────────────────────────────────────────────────────────────
+# ── PiggyServer — split into logical chunks ───────────────────────────────────
+set(PIGGY_SOURCES
+    core/engine/piggy/PiggyServer.cpp          # constructor, start/stop, connections
+    core/engine/piggy/PiggyCommandRouter.cpp   # handleCommand dispatch
+    core/engine/piggy/PiggyTabManager.cpp      # createTab, closeTab, page(), configureProfile
+    core/engine/piggy/PiggyNavigation.cpp      # navigate, reload, back/forward, wait, page.*
+    core/engine/piggy/PiggyInteractions.cpp    # click, type, hover, keyboard, mouse, evaluate
+    core/engine/piggy/PiggyCapture.cpp         # capture start/stop + all capture commands
+    core/engine/piggy/PiggyExport.cpp          # session, cookies, intercept, expose, fetch.*
+    core/engine/piggy/PiggyMedia.cpp           # screenshot, pdf, image blocking
+    core/engine/piggy/PiggyProxy.cpp           # all proxy.* commands + event wiring
+)
+
+# ── Other shared sources ──────────────────────────────────────────────────────
+
 set(SHARED_SOURCES
-    core/engine/PiggyServer.cpp
     core/engine/FingerprintSpoofer.cpp
     core/engine/NetworkCapture.cpp
     core/engine/IdentityGenerator.cpp
@@ -37,7 +47,10 @@ set(SHARED_SOURCES
     core/engine/Interceptor.cpp
     core/engine/ProxyManager.cpp
     core/tabs/PiggyTab.cpp
+    ${PIGGY_SOURCES}
+    core/engine/piggy/SessionManager.cpp   # ← new
 )
+
 
 # ── DevToolsPanel — split into logical chunks ─────────────────────────────────
 set(DEVTOOLS_SOURCES
@@ -63,7 +76,7 @@ add_executable(nothing-browser
     assets/resources.qrc
     ${DEVTOOLS_SOURCES}
     ${SHARED_SOURCES}
-    ${MOC_HEADERS}          # ← forces AUTOMOC to process every Q_OBJECT header
+    ${MOC_HEADERS}
 )
 
 # ── Headless binary ───────────────────────────────────────────────────────────
@@ -72,7 +85,7 @@ add_executable(nothing-browser-headless
     ${SHARED_SOURCES}
 )
 
-# ── Headful binary (script-controlled, visible window) ───────────────────────
+# ── Headful binary ────────────────────────────────────────────────────────────
 add_executable(nothing-browser-headful
     core/main_headful.cpp
     ${SHARED_SOURCES}
@@ -97,7 +110,15 @@ set(COMMON_LIBS
 )
 
 # ── Include dirs ──────────────────────────────────────────────────────────────
-set(COMMON_INCLUDES core core/app core/tabs core/engine core/bridge)
+set(COMMON_INCLUDES
+    core
+    core/app
+    core/tabs
+    core/engine
+    core/engine/piggy
+    core/bridge
+)
+
 target_include_directories(nothing-browser          PRIVATE ${COMMON_INCLUDES})
 target_include_directories(nothing-browser-headless PRIVATE ${COMMON_INCLUDES})
 target_include_directories(nothing-browser-headful  PRIVATE ${COMMON_INCLUDES})
