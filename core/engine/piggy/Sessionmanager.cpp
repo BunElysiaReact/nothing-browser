@@ -1,8 +1,7 @@
 #include "Sessionmanager.h"
-#include <QCoreApplication>
-#include <QFileInfo>
-#include <QFile>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -13,17 +12,16 @@
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
-QString SessionManager::binaryDir() {
-    return QFileInfo(QCoreApplication::applicationFilePath()).absolutePath();
+QString SessionManager::workDir() {
+    // Always the directory the user ran their script from.
+    // e.g. ~/projects/my-scraper/
+    return QDir::currentPath();
 }
 
-QString SessionManager::cookiesPath() {
-    return binaryDir() + "/cookies.json";
-}
-
-QString SessionManager::profilePath() {
-    return binaryDir() + "/profile.json";
-}
+QString SessionManager::cookiesPath() { return workDir() + "/cookies.json"; }
+QString SessionManager::profilePath() { return workDir() + "/profile.json"; }
+QString SessionManager::wsPath()      { return workDir() + "/ws.json";      }
+QString SessionManager::pingsPath()   { return workDir() + "/pings.json";   }
 
 // ─── Constructor ──────────────────────────────────────────────────────────────
 
@@ -34,18 +32,46 @@ SessionManager::SessionManager(QWebEngineProfile *profile, QObject *parent)
             this, &SessionManager::onFileChanged);
 }
 
+// ─── ensureWorkDir ────────────────────────────────────────────────────────────
+
+void SessionManager::ensureWorkDir() {
+    QDir().mkpath(workDir());
+}
+
 // ─── Initial load ─────────────────────────────────────────────────────────────
 
 void SessionManager::load() {
-    // Watch both files — even if they don't exist yet (we re-add after create)
+    ensureWorkDir();
+
     QString cp = cookiesPath();
     QString pp = profilePath();
 
+    // Auto-create empty cookies.json if missing so users see the format.
+    if (!QFile::exists(cp)) {
+        QFile f(cp);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            f.write("[\n]\n");
+        qDebug() << "[SessionManager] Created empty cookies.json at" << cp;
+    }
+
+    // Auto-create default profile.json if missing.
+    if (!QFile::exists(pp)) {
+        QJsonObject defaults;
+        defaults["userAgent"]           = m_profile->httpUserAgent();
+        defaults["language"]            = "en-US";
+        defaults["javascriptEnabled"]   = true;
+        defaults["imagesEnabled"]       = true;
+        defaults["webglEnabled"]        = true;
+        defaults["localStorageEnabled"] = true;
+        QFile f(pp);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text))
+            f.write(QJsonDocument(defaults).toJson(QJsonDocument::Indented));
+        qDebug() << "[SessionManager] Created default profile.json at" << pp;
+    }
+
     if (QFile::exists(cp)) m_watcher.addPath(cp);
     if (QFile::exists(pp)) m_watcher.addPath(pp);
-
-    // Also watch the directory so we catch new file creation
-    m_watcher.addPath(binaryDir());
+    m_watcher.addPath(workDir()); // catch new file creation
 
     loadProfile();
     loadCookies();
@@ -54,17 +80,16 @@ void SessionManager::load() {
 // ─── File watcher ─────────────────────────────────────────────────────────────
 
 void SessionManager::onFileChanged(const QString &path) {
-    // Qt removes a path from the watcher if the file is replaced (some editors
-    // do write-new + rename). Re-add it.
+    // Re-add if editor replaced the file (write-new + rename)
     if (!m_watcher.files().contains(path) && QFile::exists(path))
         m_watcher.addPath(path);
 
-    if (path == cookiesPath() || path == binaryDir()) {
-        qDebug() << "[SessionManager] Reloading cookies from" << path;
+    if (path == cookiesPath() || path == workDir()) {
+        qDebug() << "[SessionManager] Hot-reloading cookies from" << path;
         loadCookies();
     }
     if (path == profilePath()) {
-        qDebug() << "[SessionManager] Reloading profile from" << path;
+        qDebug() << "[SessionManager] Hot-reloading profile from" << path;
         loadProfile();
     }
 }
@@ -72,21 +97,10 @@ void SessionManager::onFileChanged(const QString &path) {
 // ─── Load cookies ─────────────────────────────────────────────────────────────
 
 void SessionManager::loadCookies() {
-    QString path = cookiesPath();
-    if (!QFile::exists(path)) {
-        qDebug() << "[SessionManager] No cookies.json found at" << path;
-        return;
-    }
-
     QJsonArray arr = readCookiesFile();
-    if (arr.isEmpty()) {
-        qDebug() << "[SessionManager] cookies.json is empty or invalid";
-        return;
-    }
+    if (arr.isEmpty()) return;
 
     auto *store = m_profile->cookieStore();
-
-    // Clear existing cookies first so stale ones don't linger
     store->deleteAllCookies();
 
     int loaded = 0;
@@ -95,154 +109,103 @@ void SessionManager::loadCookies() {
         QJsonObject obj = v.toObject();
 
         QString name   = obj["name"].toString();
-        QString value  = obj["value"].toString();
         QString domain = obj["domain"].toString();
-
-        if (name.isEmpty() || domain.isEmpty()) {
-            qWarning() << "[SessionManager] Skipping cookie with missing name/domain";
-            continue;
-        }
+        if (name.isEmpty() || domain.isEmpty()) continue;
 
         QNetworkCookie cookie;
         cookie.setName(name.toUtf8());
-        cookie.setValue(value.toUtf8());
+        cookie.setValue(obj["value"].toString().toUtf8());
         cookie.setDomain(domain);
         cookie.setPath(obj["path"].toString("/"));
         cookie.setSecure(obj["secure"].toBool(false));
         cookie.setHttpOnly(obj["httpOnly"].toBool(false));
 
-        // Expires — unix timestamp, 0 or absent = session cookie
         qint64 exp = obj["expires"].toVariant().toLongLong();
         if (exp > 0)
             cookie.setExpirationDate(QDateTime::fromSecsSinceEpoch(exp));
 
-        // Build the origin URL for setCookie
-        // domain ".ebay.com" → "https://ebay.com"  (strip leading dot)
-        QString host = domain.startsWith('.') ? domain.mid(1) : domain;
+        QString host   = domain.startsWith('.') ? domain.mid(1) : domain;
         QString scheme = cookie.isSecure() ? "https" : "http";
-        QUrl origin(scheme + "://" + host);
-
-        store->setCookie(cookie, origin);
+        store->setCookie(cookie, QUrl(scheme + "://" + host));
         loaded++;
     }
 
-    qDebug() << "[SessionManager] Loaded" << loaded << "cookies from cookies.json";
+    qDebug() << "[SessionManager] Loaded" << loaded << "cookies from" << cookiesPath();
     emit cookiesLoaded(loaded);
 
-    // Make sure file is watched (may have just been created)
-    if (!m_watcher.files().contains(path))
-        m_watcher.addPath(path);
+    if (!m_watcher.files().contains(cookiesPath()))
+        m_watcher.addPath(cookiesPath());
 }
 
 // ─── Load profile ─────────────────────────────────────────────────────────────
 
 void SessionManager::loadProfile() {
-    QString path = profilePath();
-    if (!QFile::exists(path)) {
-        qDebug() << "[SessionManager] No profile.json found at" << path;
-        return;
-    }
-
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "[SessionManager] Cannot open profile.json";
-        return;
-    }
+    QFile f(profilePath());
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return;
 
     QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     f.close();
-    if (!doc.isObject()) {
-        qWarning() << "[SessionManager] profile.json is not a valid JSON object";
-        return;
-    }
+    if (!doc.isObject()) return;
 
     QJsonObject obj = doc.object();
-
-    // User agent
-    if (obj.contains("userAgent")) {
-        QString ua = obj["userAgent"].toString();
-        if (!ua.isEmpty()) {
-            m_profile->setHttpUserAgent(ua);
-            qDebug() << "[SessionManager] UA set to:" << ua;
-        }
-    }
-
-    // HTTP accept language
-    if (obj.contains("language")) {
-        m_profile->setHttpAcceptLanguage(obj["language"].toString());
-    }
-
-    // Web settings
     auto *s = m_profile->settings();
 
+    if (obj.contains("userAgent")) {
+        QString ua = obj["userAgent"].toString();
+        if (!ua.isEmpty()) m_profile->setHttpUserAgent(ua);
+    }
+    if (obj.contains("language"))
+        m_profile->setHttpAcceptLanguage(obj["language"].toString());
     if (obj.contains("javascriptEnabled"))
         s->setAttribute(QWebEngineSettings::JavascriptEnabled,
                         obj["javascriptEnabled"].toBool(true));
-
     if (obj.contains("imagesEnabled"))
         s->setAttribute(QWebEngineSettings::AutoLoadImages,
                         obj["imagesEnabled"].toBool(true));
-
     if (obj.contains("webglEnabled"))
         s->setAttribute(QWebEngineSettings::WebGLEnabled,
                         obj["webglEnabled"].toBool(true));
-
     if (obj.contains("localStorageEnabled"))
         s->setAttribute(QWebEngineSettings::LocalStorageEnabled,
                         obj["localStorageEnabled"].toBool(true));
 
-    if (obj.contains("doNotTrack")) {
-        // Qt doesn't expose DNT directly but we can set a custom header via interceptor
-        // Store the value for the interceptor to use
-        qDebug() << "[SessionManager] doNotTrack:" << obj["doNotTrack"].toBool();
-    }
-
-    qDebug() << "[SessionManager] Profile loaded from profile.json";
+    qDebug() << "[SessionManager] Profile loaded from" << profilePath();
     emit profileLoaded();
 
-    if (!m_watcher.files().contains(path))
-        m_watcher.addPath(path);
+    if (!m_watcher.files().contains(profilePath()))
+        m_watcher.addPath(profilePath());
 }
 
-// ─── Write cookies back to file ───────────────────────────────────────────────
+// ─── Cookie file helpers ──────────────────────────────────────────────────────
 
 QJsonArray SessionManager::readCookiesFile() const {
     QFile f(cookiesPath());
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return QJsonArray();
     QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-    if (doc.isArray()) return doc.array();
-    return QJsonArray();
+    return doc.isArray() ? doc.array() : QJsonArray();
 }
 
 void SessionManager::writeCookiesFile(const QJsonArray &arr) {
     QString path = cookiesPath();
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qWarning() << "[SessionManager] Cannot write cookies.json";
+        qWarning() << "[SessionManager] Cannot write" << path;
         return;
     }
     f.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
     f.close();
-
-    // Re-add to watcher (some editors cause removal on save)
     if (!m_watcher.files().contains(path))
         m_watcher.addPath(path);
-
     emit cookiesSaved();
 }
 
-// ─── saveCookieToFile — called by cookie.set command ─────────────────────────
-
 void SessionManager::saveCookieToFile(const QNetworkCookie &cookie) {
     QJsonArray arr = readCookiesFile();
-
-    // Find existing entry with same name+domain and replace it
     bool found = false;
     for (int i = 0; i < arr.size(); i++) {
         QJsonObject o = arr[i].toObject();
-        if (o["name"].toString() == QString::fromUtf8(cookie.name()) &&
+        if (o["name"].toString()   == QString::fromUtf8(cookie.name()) &&
             o["domain"].toString() == cookie.domain()) {
-            // Update in place
             o["value"]    = QString::fromUtf8(cookie.value());
             o["path"]     = cookie.path();
             o["secure"]   = cookie.isSecure();
@@ -254,9 +217,7 @@ void SessionManager::saveCookieToFile(const QNetworkCookie &cookie) {
             break;
         }
     }
-
     if (!found) {
-        // Append new entry
         QJsonObject o;
         o["name"]     = QString::fromUtf8(cookie.name());
         o["value"]    = QString::fromUtf8(cookie.value());
@@ -268,24 +229,44 @@ void SessionManager::saveCookieToFile(const QNetworkCookie &cookie) {
             o["expires"] = cookie.expirationDate().toSecsSinceEpoch();
         arr.append(o);
     }
-
     writeCookiesFile(arr);
     qDebug() << "[SessionManager] Saved cookie:" << cookie.name() << "@" << cookie.domain();
 }
 
-// ─── removeCookieFromFile — called by cookie.delete command ──────────────────
-
 void SessionManager::removeCookieFromFile(const QString &name, const QString &domain) {
-    QJsonArray arr = readCookiesFile();
-    QJsonArray updated;
-
+    QJsonArray arr = readCookiesFile(), updated;
     for (const QJsonValue &v : arr) {
         QJsonObject o = v.toObject();
-        if (o["name"].toString() == name && o["domain"].toString() == domain)
-            continue; // skip = delete
+        if (o["name"].toString() == name && o["domain"].toString() == domain) continue;
         updated.append(o);
     }
-
     writeCookiesFile(updated);
     qDebug() << "[SessionManager] Removed cookie:" << name << "@" << domain;
+}
+
+// ─── Append helpers for optional capture files ────────────────────────────────
+
+void SessionManager::appendToJsonArrayFile(const QString &path, const QJsonObject &entry) {
+    // Read existing array (or start fresh), append entry, write back.
+    QJsonArray arr;
+    QFile rf(path);
+    if (rf.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QJsonDocument doc = QJsonDocument::fromJson(rf.readAll());
+        if (doc.isArray()) arr = doc.array();
+        rf.close();
+    }
+    arr.append(entry);
+    QFile wf(path);
+    if (wf.open(QIODevice::WriteOnly | QIODevice::Text))
+        wf.write(QJsonDocument(arr).toJson(QJsonDocument::Indented));
+}
+
+void SessionManager::appendWsFrame(const QJsonObject &frame) {
+    if (!m_saveWs) return;
+    appendToJsonArrayFile(wsPath(), frame);
+}
+
+void SessionManager::appendPing(const QJsonObject &ping) {
+    if (!m_savePings) return;
+    appendToJsonArrayFile(pingsPath(), ping);
 }

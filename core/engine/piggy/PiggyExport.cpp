@@ -1,4 +1,5 @@
 #include "PiggyServer.h"
+#include "Sessionmanager.h"
 #include "../NetworkCapture.h"
 #include "../Interceptor.h"
 #include "../../tabs/PiggyTab.h"
@@ -10,21 +11,18 @@
 #include <QNetworkCookie>
 #include <QJsonDocument>
 #include <QJsonArray>
-#include "Sessionmanager.h"
 
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 
 static void applyInterceptRules(Interceptor * /*interceptor*/,
-                                 const QVector<InterceptRule> & /*rules*/) {
-    // Hook into Interceptor::setRules if/when that API exists
-}
+                                 const QVector<InterceptRule> & /*rules*/) {}
 
 bool piggy_handleExport(PiggyServer *srv, const QString &c,
                          const QJsonObject &payload,
                          QLocalSocket *client, const QString &id,
                          const QString &tabId) {
 
-    // ── search / fetch ────────────────────────────────────────────────────────
+    // ── DOM fetch ─────────────────────────────────────────────────────────────
     if (c == "search.css") {
         piggy_page(srv, tabId)->runJavaScript(PiggyTab::domExtractorJS(),
             [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
@@ -78,7 +76,7 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // ── cookie commands ───────────────────────────────────────────────────────
+    // ── Cookie commands ───────────────────────────────────────────────────────
     if (c == "cookie.set") {
         QString name   = payload["name"].toString();
         QString value  = payload["value"].toString();
@@ -103,22 +101,16 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         if (expiry > 0)
             cookie.setExpirationDate(QDateTime::fromSecsSinceEpoch(expiry));
 
-        // Apply to browser
         QString host = domain.startsWith('.') ? domain.mid(1) : domain;
         piggy_page(srv, tabId)->profile()->cookieStore()->setCookie(
             cookie, QUrl((secure ? "https" : "http") + QString("://") + host));
 
-        // Write back to cookies.json
-        if (srv->session())
-            srv->session()->saveCookieToFile(cookie);
-
+        if (srv->session()) srv->session()->saveCookieToFile(cookie);
         srv->respond(client, id, true, "cookie set");
         return true;
     }
 
     if (c == "cookie.get") {
-        // Async — collect via cookieStore()->loadAllCookies() or cookieAdded signal.
-        // For now return not-implemented; full async impl would need a pending-reply map.
         srv->respond(client, id, false, "cookie.get not implemented (async)");
         return true;
     }
@@ -130,19 +122,13 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
             srv->respond(client, id, false, "cookie.delete requires name and domain");
             return true;
         }
-
         QNetworkCookie cookie;
         cookie.setName(name.toUtf8());
         cookie.setDomain(domain);
-
         QString host = domain.startsWith('.') ? domain.mid(1) : domain;
         piggy_page(srv, tabId)->profile()->cookieStore()->deleteCookie(
             cookie, QUrl("https://" + host));
-
-        // Remove from cookies.json
-        if (srv->session())
-            srv->session()->removeCookieFromFile(name, domain);
-
+        if (srv->session()) srv->session()->removeCookieFromFile(name, domain);
         srv->respond(client, id, true, "cookie deleted");
         return true;
     }
@@ -152,7 +138,8 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // ── NEW: reload cookies/profile from disk on demand ───────────────────────
+    // ── Session commands ──────────────────────────────────────────────────────
+
     if (c == "session.reload") {
         if (srv->session()) {
             srv->session()->load();
@@ -172,13 +159,53 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         srv->respond(client, id, true, SessionManager::profilePath());
         return true;
     }
-    // ── intercept rules ───────────────────────────────────────────────────────
+
+    if (c == "session.ws.path") {
+        srv->respond(client, id, true, SessionManager::wsPath());
+        return true;
+    }
+
+    if (c == "session.pings.path") {
+        srv->respond(client, id, true, SessionManager::pingsPath());
+        return true;
+    }
+
+    // Return all data file paths at once — useful for the JS library to show
+    // the user where everything is on startup.
+    if (c == "session.paths") {
+        QJsonObject paths;
+        paths["workDir"]  = SessionManager::workDir();
+        paths["cookies"]  = SessionManager::cookiesPath();
+        paths["profile"]  = SessionManager::profilePath();
+        paths["ws"]       = SessionManager::wsPath();
+        paths["pings"]    = SessionManager::pingsPath();
+        srv->respond(client, id, true, paths);
+        return true;
+    }
+
+    // Enable / disable ws.json persistence (opt-in)
+    if (c == "session.ws.save") {
+        bool on = payload["enabled"].toBool(true);
+        if (srv->session()) srv->session()->setSaveWs(on);
+        srv->respond(client, id, true, on ? "ws saving enabled" : "ws saving disabled");
+        return true;
+    }
+
+    // Enable / disable pings.json persistence (opt-in)
+    if (c == "session.pings.save") {
+        bool on = payload["enabled"].toBool(true);
+        if (srv->session()) srv->session()->setSavePings(on);
+        srv->respond(client, id, true, on ? "pings saving enabled" : "pings saving disabled");
+        return true;
+    }
+
+    // ── Intercept rules ───────────────────────────────────────────────────────
     if (c == "intercept.rule.add") {
         if (!srv->tabs().contains(tabId)) { srv->respond(client, id, false, "invalid tabId"); return true; }
         InterceptRule rule;
-        rule.urlPattern = payload["pattern"].toString();
-        rule.block      = payload["block"].toBool(false);
-        rule.redirectUrl= payload["redirect"].toString();
+        rule.urlPattern  = payload["pattern"].toString();
+        rule.block       = payload["block"].toBool(false);
+        rule.redirectUrl = payload["redirect"].toString();
         QJsonObject hdrs = payload["setHeaders"].toObject();
         for (auto it = hdrs.begin(); it != hdrs.end(); ++it)
             rule.setHeaders[it.key()] = it.value().toString();
@@ -197,7 +224,7 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // ── session export ────────────────────────────────────────────────────────
+    // ── Session export / import ───────────────────────────────────────────────
     if (c == "session.export") {
         if (!srv->tabs().contains(tabId)) { srv->respond(client, id, false, "invalid tabId"); return true; }
         QJsonObject root;
@@ -233,7 +260,6 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // ── session import ────────────────────────────────────────────────────────
     if (c == "session.import") {
         if (!srv->tabs().contains(tabId)) { srv->respond(client, id, false, "invalid tabId"); return true; }
         QJsonDocument doc = QJsonDocument::fromJson(payload["data"].toString().toUtf8());
@@ -244,11 +270,11 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
             CapturedRequest req; QJsonObject o = v.toObject();
             req.method = o["method"].toString(); req.url    = o["url"].toString();
             req.status = o["status"].toString(); req.type   = o["type"].toString();
-            req.mimeType       = o["mime"].toString();
-            req.requestHeaders = o["reqHeaders"].toString();
-            req.requestBody    = o["reqBody"].toString();
-            req.responseHeaders= o["resHeaders"].toString();
-            req.responseBody   = o["resBody"].toString();
+            req.mimeType        = o["mime"].toString();
+            req.requestHeaders  = o["reqHeaders"].toString();
+            req.requestBody     = o["reqBody"].toString();
+            req.responseHeaders = o["resHeaders"].toString();
+            req.responseBody    = o["resBody"].toString();
             ctx.capturedRequests.append(req);
         }
         for (auto v : root["ws"].toArray()) {
@@ -295,7 +321,6 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // ── exposed.result ────────────────────────────────────────────────────────
     if (c == "exposed.result") {
         if (!srv->tabs().contains(tabId)) { srv->respond(client, id, false, "invalid tabId"); return true; }
         QString callId  = payload["callId"].toString();
@@ -327,7 +352,7 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         script.setInjectionPoint(QWebEngineScript::DocumentCreation);
         script.setWorldId(QWebEngineScript::MainWorld);
         script.setRunsOnSubFrames(true);
-        ctx.page->profile()->scripts()->insert(script);
+        piggy_page(srv, tabId)->profile()->scripts()->insert(script);
         srv->respond(client, id, true, "init script added");
         return true;
     }

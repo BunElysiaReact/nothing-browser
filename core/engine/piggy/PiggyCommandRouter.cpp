@@ -34,10 +34,10 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
 // ─── Main command router ──────────────────────────────────────────────────────
 
 void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket *client) {
-    const QString id      = cmd["id"].toString();
-    const QString c       = cmd["cmd"].toString();
+    const QString id          = cmd["id"].toString();
+    const QString c           = cmd["cmd"].toString();
     const QJsonObject payload = cmd["payload"].toObject();
-    const QString tabId   = payload["tabId"].toString();
+    const QString tabId       = payload["tabId"].toString();
 
     // ── Tab management ────────────────────────────────────────────────────────
     if (c == "tab.new") {
@@ -64,21 +64,25 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         return;
     }
 
-    // ── Navigation commands ───────────────────────────────────────────────────
+    // ── Navigation ───────────────────────────────────────────────────────────
     if (piggy_handleNavigation(srv, c, payload, client, id, tabId)) return;
 
-    // ── Media commands ────────────────────────────────────────────────────────
+    // ── Media ─────────────────────────────────────────────────────────────────
     if (piggy_handleMedia(srv, c, payload, client, id, tabId)) return;
 
-    // ── Capture commands ──────────────────────────────────────────────────────
+    // ── Capture ───────────────────────────────────────────────────────────────
     if (piggy_handleCapture(srv, c, payload, client, id, tabId)) return;
 
-    // ── Interaction commands ──────────────────────────────────────────────────
+    // ── Interaction ───────────────────────────────────────────────────────────
     if (piggy_handleInteraction(srv, c, payload, client, id, tabId)) return;
 
-    // ── Export / session / cookie / init script / expose commands ────────────
+    // ── Export / session / cookie / init script / expose ─────────────────────
+    // This handles: fetch.*, search.*, cookie.*, session.*, intercept.*,
+    //               expose.*, exposed.*, addInitScript
+    // All new session.* commands (session.ws.save, session.pings.save,
+    // session.paths, session.ws.path, session.pings.path) land here.
     if (piggy_handleExport(srv, c, payload, client, id, tabId)) return;
 
-    // ── Unknown command ───────────────────────────────────────────────────────
+    // ── Unknown ───────────────────────────────────────────────────────────────
     srv->respond(client, id, false, "unknown command: " + c);
 }

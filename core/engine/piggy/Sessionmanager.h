@@ -11,23 +11,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  SessionManager
 //
-//  Loads cookies.json and profile.json from the same folder as the binary.
-//  Both files are watched — any change on disk is applied live, no restart.
+//  All data files live in the CURRENT WORKING DIRECTORY — i.e. the folder the
+//  user ran their script from, e.g. ~/projects/my-scraper/.
 //
-//  cookies.json  — standard browser cookie format (Chrome DevTools / Playwright)
-//  profile.json  — UA string, web settings overrides
+//  Files auto-created on first use:
+//    cookies.json  — persistent cookies (preloaded on every start, hot-reloaded on change)
+//    profile.json  — UA, language, web settings
+//    ws.json       — WebSocket frames (opt-in via saveWs flag)
+//    pings.json    — health/ping log (opt-in via savePings flag)
 //
 //  cookies.json format:
 //  [
 //    {
-//      "name":     "session_id",       // required
-//      "value":    "abc123",           // required
-//      "domain":   ".ebay.com",        // required  (leading dot = include subdomains)
-//      "path":     "/",               // optional, default "/"
-//      "secure":   true,              // optional, default false
-//      "httpOnly": true,              // optional, default false
-//      "sameSite": "Lax",            // optional: Strict | Lax | None
-//      "expires":  1735689600        // optional: unix timestamp, omit = session cookie
+//      "name":     "session_id",    // required
+//      "value":    "abc123",        // required
+//      "domain":   ".ebay.com",     // required
+//      "path":     "/",             // optional, default "/"
+//      "secure":   true,            // optional, default false
+//      "httpOnly": true,            // optional, default false
+//      "expires":  1735689600       // optional: unix timestamp
 //    }
 //  ]
 //
@@ -50,15 +52,26 @@ public:
     // ── Initial load (call once after profile is set up) ──────────────────────
     void load();
 
+    // ── Opt-in flags for optional capture files ───────────────────────────────
+    void setSaveWs(bool on)    { m_saveWs = on; }
+    void setSavePings(bool on) { m_savePings = on; }
+    bool saveWs()    const { return m_saveWs; }
+    bool savePings() const { return m_savePings; }
+
     // ── Called by cookie.set / cookie.delete commands ─────────────────────────
-    // Writes the change back to cookies.json on disk immediately.
     void saveCookieToFile(const QNetworkCookie &cookie);
     void removeCookieFromFile(const QString &name, const QString &domain);
 
-    // ── Path helpers ──────────────────────────────────────────────────────────
-    static QString binaryDir();   // folder containing the binary
-    static QString cookiesPath(); // <binaryDir>/cookies.json
-    static QString profilePath(); // <binaryDir>/profile.json
+    // ── Called by capture to append to optional logs ──────────────────────────
+    void appendWsFrame(const QJsonObject &frame);   // only writes if m_saveWs
+    void appendPing(const QJsonObject &ping);       // only writes if m_savePings
+
+    // ── Path helpers — all rooted at QDir::currentPath() ─────────────────────
+    static QString workDir();     // QDir::currentPath()
+    static QString cookiesPath(); // <workDir>/cookies.json
+    static QString profilePath(); // <workDir>/profile.json
+    static QString wsPath();      // <workDir>/ws.json
+    static QString pingsPath();   // <workDir>/pings.json
 
 signals:
     void cookiesLoaded(int count);
@@ -71,9 +84,13 @@ private slots:
 private:
     void loadCookies();
     void loadProfile();
+    void ensureWorkDir();
     void writeCookiesFile(const QJsonArray &arr);
     QJsonArray readCookiesFile() const;
+    void appendToJsonArrayFile(const QString &path, const QJsonObject &entry);
 
-    QWebEngineProfile    *m_profile = nullptr;
+    QWebEngineProfile    *m_profile   = nullptr;
     QFileSystemWatcher    m_watcher;
+    bool                  m_saveWs    = false;
+    bool                  m_savePings = false;
 };

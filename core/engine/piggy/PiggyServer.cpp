@@ -69,6 +69,9 @@ void PiggyServer::start() {
         return;
     }
     qDebug() << "[PiggyServer] Listening on socket:" << SOCKET_NAME;
+    qDebug() << "[PiggyServer] Working directory:" << SessionManager::workDir();
+    qDebug() << "[PiggyServer] Cookies:" << SessionManager::cookiesPath();
+    qDebug() << "[PiggyServer] Profile:" << SessionManager::profilePath();
 }
 
 void PiggyServer::stop() {
@@ -190,7 +193,22 @@ void PiggyServer::onRequestCaptured(const CapturedRequest &req, const QString &t
 
 void PiggyServer::onWsFrameCaptured(const WebSocketFrame &frame, const QString &tabId) {
     if (!m_tabs.contains(tabId)) return;
-    if (m_tabs[tabId].captureActive) m_tabs[tabId].capturedWsFrames.append(frame);
+    if (m_tabs[tabId].captureActive) {
+        m_tabs[tabId].capturedWsFrames.append(frame);
+
+        // Persist to ws.json in cwd if opt-in is on
+        if (m_session && m_session->saveWs()) {
+            QJsonObject entry;
+            entry["tabId"]        = tabId;
+            entry["connectionId"] = frame.connectionId;
+            entry["url"]          = frame.url;
+            entry["direction"]    = frame.direction;
+            entry["data"]         = frame.data;
+            entry["binary"]       = frame.isBinary;
+            entry["timestamp"]    = frame.timestamp;
+            m_session->appendWsFrame(entry);
+        }
+    }
 }
 
 void PiggyServer::onCookieCaptured(const CapturedCookie &cookie, const QString &tabId) {

@@ -10,7 +10,13 @@
 #include <QWidget>
 #include <QPushButton>
 #include <QMap>
-#include "../engine/piggy/PiggyServer.h"
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QUuid>
+#include <QDir>
+#include <QFile>
+#include "engine/piggy/PiggyServer.h"
+#include "engine/piggy/Sessionmanager.h"
 #include "engine/FingerprintSpoofer.h"
 #include "engine/NetworkCapture.h"
 
@@ -49,13 +55,8 @@ public:
             }
             QTabBar::tab:hover { background:#181818; color:#aaaaaa; }
             QTabBar::tab:first { border-left:1px solid #1a1a1a; }
-            QTabBar::close-button {
-                image: none;
-                subcontrol-position: right;
-            }
         )");
 
-        // + new tab button
         auto *newTabBtn = new QPushButton("+", m_tabs);
         newTabBtn->setFixedSize(28, 24);
         newTabBtn->setCursor(Qt::PointingHandCursor);
@@ -68,19 +69,16 @@ public:
         )");
         m_tabs->setCornerWidget(newTabBtn, Qt::TopRightCorner);
 
-        // wire default page as tab 0
         addPageAsTab(defaultPage, "New Tab");
 
-        connect(m_tabs,   &QTabWidget::tabCloseRequested,
-                this,     &HeadfulWindow::onTabCloseRequested);
+        connect(m_tabs,    &QTabWidget::tabCloseRequested,
+                this,      &HeadfulWindow::onTabCloseRequested);
         connect(newTabBtn, &QPushButton::clicked,
                 this,      &HeadfulWindow::onNewTabClicked);
-
-        // script-driven tab creation / deletion
-        connect(server, &PiggyServer::tabCreated,
-                this,   &HeadfulWindow::onScriptTabCreated);
-        connect(server, &PiggyServer::tabClosed,
-                this,   &HeadfulWindow::onScriptTabClosed);
+        connect(server,    &PiggyServer::tabCreated,
+                this,      &HeadfulWindow::onScriptTabCreated);
+        connect(server,    &PiggyServer::tabClosed,
+                this,      &HeadfulWindow::onScriptTabClosed);
 
         layout->addWidget(m_tabs);
         setCentralWidget(central);
@@ -88,11 +86,10 @@ public:
 
 private slots:
     void onTabCloseRequested(int idx) {
-        if (m_tabs->count() <= 1) return;   // never close last tab
+        if (m_tabs->count() <= 1) return;
         auto *view = qobject_cast<QWebEngineView*>(m_tabs->widget(idx));
         if (!view) return;
         QWebEnginePage *pg = view->page();
-        // remove from maps
         m_pageToTabIndex.remove(pg);
         QString tabId = m_pageToTabId.value(pg);
         if (!tabId.isEmpty()) m_tabIdToPage.remove(tabId);
@@ -102,7 +99,6 @@ private slots:
     }
 
     void onNewTabClicked() {
-        // user-opened blank tab — not script-managed
         auto *profile = new QWebEngineProfile(this);
         profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
         profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
@@ -133,22 +129,15 @@ private:
     void addPageAsTab(QWebEnginePage *pg, const QString &title) {
         auto *view = new QWebEngineView(this);
         view->setPage(pg);
-
         int idx = m_tabs->addTab(view, title);
         m_tabs->setCurrentIndex(idx);
         m_pageToTabIndex[pg] = idx;
 
-        // update tab title when page loads
-        connect(pg, &QWebEnginePage::titleChanged,
-                this, [this, pg](const QString &t) {
+        connect(pg, &QWebEnginePage::titleChanged, this, [this, pg](const QString &t) {
             int i = m_pageToTabIndex.value(pg, -1);
-            if (i >= 0)
-                m_tabs->setTabText(i, t.isEmpty() ? "New Tab" : t.left(28));
+            if (i >= 0) m_tabs->setTabText(i, t.isEmpty() ? "New Tab" : t.left(28));
         });
-
-        // update tab title on url change for blank tabs
-        connect(pg, &QWebEnginePage::urlChanged,
-                this, [this, pg](const QUrl &url) {
+        connect(pg, &QWebEnginePage::urlChanged, this, [this, pg](const QUrl &url) {
             int i = m_pageToTabIndex.value(pg, -1);
             if (i >= 0 && m_tabs->tabText(i) == "New Tab" && !url.isEmpty())
                 m_tabs->setTabText(i, url.host().left(28));
@@ -163,21 +152,39 @@ private:
         }
     }
 
-    QTabWidget                      *m_tabs;
-    PiggyServer                     *m_server;
-    QMap<QWebEnginePage*, int>       m_pageToTabIndex;
-    QMap<QWebEnginePage*, QString>   m_pageToTabId;
-    QMap<QString, QWebEnginePage*>   m_tabIdToPage;
+    QTabWidget                     *m_tabs;
+    PiggyServer                    *m_server;
+    QMap<QWebEnginePage*, int>      m_pageToTabIndex;
+    QMap<QWebEnginePage*, QString>  m_pageToTabId;
+    QMap<QString, QWebEnginePage*>  m_tabIdToPage;
 };
+
+// ─── Key helpers — identical to headless, both use cwd ───────────────────────
+
+static QString generateKey() {
+    QString a = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
+    QString b = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
+    return "peaseernest" + (a + b).left(53);
+}
+
+static QString keyFilePath(const QString &name) {
+    // Lives in cwd — same folder as cookies.json / profile.json
+    return SessionManager::workDir() + "/" + name + ".piggy";
+}
+
+static std::pair<QString, QString> loadExistingKey() {
+    QDir dir(SessionManager::workDir());
+    QStringList files = dir.entryList({"*.piggy"}, QDir::Files);
+    if (files.isEmpty()) return {"", ""};
+    QFile f(dir.filePath(files.first()));
+    if (!f.open(QIODevice::ReadOnly)) return {"", ""};
+    QJsonObject obj = QJsonDocument::fromJson(f.readAll()).object();
+    return {obj["name"].toString(), obj["key"].toString()};
+}
 
 // ─── main ────────────────────────────────────────────────────────────────────
 
 int main(int argc, char *argv[]) {
-    // FIX: added --disable-dev-shm-usage       → prevents shm SIGSEGV on low-RAM machines
-    //      added --disable-site-isolation-trials → disables COOP renderer isolation
-    //        that crashes on ChatGPT (and other sites with COOP/COEP headers)
-    //      added --disable-features=IsolateOrigins → same family
-    //      added --js-flags                     → cap renderer heap for i3/8GB
     qputenv("QTWEBENGINE_CHROMIUM_FLAGS",
         "--disable-blink-features=AutomationControlled "
         "--no-sandbox "
@@ -212,14 +219,10 @@ int main(int argc, char *argv[]) {
     auto &spoofer = FingerprintSpoofer::instance();
     profile->setHttpUserAgent(spoofer.identity().userAgent);
 
-    // FIX: DocumentCreation instead of DocumentReady.
-    //      DocumentReady on COOP-isolated pages (ChatGPT) races the renderer
-    //      context setup → SIGSEGV exit 139. DocumentCreation fires before
-    //      any page JS runs — stable on all sites including COOP ones.
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
     spoofScript.setSourceCode(spoofer.injectionScript());
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
@@ -227,7 +230,7 @@ int main(int argc, char *argv[]) {
     QWebEngineScript capScript;
     capScript.setName("nothing_capture");
     capScript.setSourceCode(NetworkCapture::captureScript());
-    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation); // FIX
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     capScript.setWorldId(QWebEngineScript::MainWorld);
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);
@@ -255,14 +258,28 @@ int main(int argc, char *argv[]) {
 </html>
 )HTML");
 
-    // ── server + window ───────────────────────────────────────────────────────
+    // ── server ────────────────────────────────────────────────────────────────
     auto *server = new PiggyServer(defaultPage, &app);
     server->start();
+
+    // ── HTTP mode if a .piggy key file exists in cwd ──────────────────────────
+    auto [name, key] = loadExistingKey();
+    if (!key.isEmpty()) {
+        server->startHttp(key);
+        qInfo() << "[HeadfulPiggy] HTTP API ready on port 2005, session:" << name;
+    } else {
+        qInfo() << "[HeadfulPiggy] Socket mode — no .piggy key file in cwd";
+        qInfo() << "[HeadfulPiggy] To use HTTP mode, run headless first to generate a key,";
+        qInfo() << "               or create <name>.piggy manually in:" << SessionManager::workDir();
+    }
+
+    qInfo() << "[HeadfulPiggy] Working dir:" << SessionManager::workDir();
+    qInfo() << "[HeadfulPiggy] Cookies:    " << SessionManager::cookiesPath();
+    qInfo() << "[HeadfulPiggy] Profile:    " << SessionManager::profilePath();
 
     HeadfulWindow window(server, defaultPage);
     window.show();
 
-    qDebug() << "[HeadfulPiggy] Window open, socket: piggy";
     return app.exec();
 }
 

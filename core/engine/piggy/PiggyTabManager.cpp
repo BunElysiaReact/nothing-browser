@@ -3,6 +3,7 @@
 #include "../NetworkCapture.h"
 #include "../Interceptor.h"
 #include "../FingerprintSpoofer.h"
+#include "Sessionmanager.h"
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -14,9 +15,15 @@
 #include <QUuid>
 
 // ─── Profile configuration ────────────────────────────────────────────────────
+// Storage always goes into the current working directory — the folder the user
+// ran their script from (e.g. ~/projects/my-scraper/).
 
 void piggy_configureProfile(QWebEngineProfile *profile) {
-    QString base = QDir::homePath() + "/.piggy/" + profile->storageName();
+    // Root is cwd, not ~/.piggy
+    QString base = SessionManager::workDir() + "/.piggy-data/" + profile->storageName();
+    QDir().mkpath(base + "/storage");
+    QDir().mkpath(base + "/cache");
+
     profile->setPersistentStoragePath(base + "/storage");
     profile->setCachePath(base + "/cache");
     profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
@@ -42,11 +49,21 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
 (function() {
     Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
     Object.defineProperty(navigator, 'plugins', {
-        get: () => { var arr=[{name:'Chrome PDF Plugin'},{name:'Chrome PDF Viewer'},{name:'Native Client'}]; arr.item=i=>arr[i]; arr.refresh=()=>{}; arr.namedItem=n=>arr.find(p=>p.name===n)||null; return arr; },
+        get: () => {
+            var arr = [
+                {name:'Chrome PDF Plugin'},
+                {name:'Chrome PDF Viewer'},
+                {name:'Native Client'}
+            ];
+            arr.item      = i => arr[i];
+            arr.refresh   = () => {};
+            arr.namedItem = n => arr.find(p => p.name === n) || null;
+            return arr;
+        },
         configurable: true
     });
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'], configurable: true });
-    Object.defineProperty(navigator, 'platform',  { get: () => 'Win32', configurable: true });
+    Object.defineProperty(navigator, 'platform',  { get: () => 'Win32',        configurable: true });
     Object.defineProperty(navigator, 'userAgent', {
         get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         configurable: true
@@ -62,9 +79,12 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
             platform: 'Windows',
             getHighEntropyValues: function(hints) {
                 return Promise.resolve({
-                    platform: 'Windows', platformVersion: '10.0.0',
-                    architecture: 'x86', bitness: '64', model: '',
-                    uaFullVersion: '124.0.0.0',
+                    platform:        'Windows',
+                    platformVersion: '10.0.0',
+                    architecture:    'x86',
+                    bitness:         '64',
+                    model:           '',
+                    uaFullVersion:   '124.0.0.0',
                     fullVersionList: [
                         { brand: 'Chromium',      version: '124.0.0.0' },
                         { brand: 'Google Chrome', version: '124.0.0.0' },
@@ -80,8 +100,12 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
             runtime: {
                 onMessage:   { addListener: function(){}, removeListener: function(){} },
                 sendMessage: function(){},
-                connect:     function(){ return { onMessage:{addListener:function(){}}, postMessage:function(){}, disconnect:function(){} }; },
-                onConnect:   { addListener: function(){} },
+                connect:     function(){ return {
+                    onMessage:   { addListener: function(){} },
+                    postMessage: function(){},
+                    disconnect:  function(){}
+                }; },
+                onConnect: { addListener: function(){} },
                 id: undefined
             },
             loadTimes: function(){ return {}; },
@@ -90,7 +114,9 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
     }
     if (!navigator.permissions) {
         Object.defineProperty(navigator, 'permissions', {
-            get: () => ({ query: function(p){ return Promise.resolve({ state:'granted', onchange:null }); } }),
+            get: () => ({
+                query: function(p){ return Promise.resolve({ state:'granted', onchange:null }); }
+            }),
             configurable: true
         });
     }
@@ -173,17 +199,11 @@ QString piggy_createTab(PiggyServer *srv) {
     capture->attachToPage(p, profile);
 
     QObject::connect(capture, &NetworkCapture::requestCaptured, srv,
-        [srv, id](const CapturedRequest &req) {
-            srv->onRequestCaptured(req, id);
-        });
+        [srv, id](const CapturedRequest &req) { srv->onRequestCaptured(req, id); });
     QObject::connect(capture, &NetworkCapture::wsFrameCaptured, srv,
-        [srv, id](const WebSocketFrame &frame) {
-            srv->onWsFrameCaptured(frame, id);
-        });
+        [srv, id](const WebSocketFrame &frame) { srv->onWsFrameCaptured(frame, id); });
     QObject::connect(capture, &NetworkCapture::cookieCaptured, srv,
-        [srv, id](const CapturedCookie &cookie) {
-            srv->onCookieCaptured(cookie, id);
-        });
+        [srv, id](const CapturedCookie &cookie) { srv->onCookieCaptured(cookie, id); });
     QObject::connect(capture, &NetworkCapture::cookieRemoved, srv,
         [srv, id](const QString &name, const QString &domain) {
             srv->onCookieRemoved(name, domain, id);

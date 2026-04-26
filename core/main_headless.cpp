@@ -9,23 +9,24 @@
 #include <QDateTime>
 #include <QUuid>
 #include <QCoreApplication>
-#include "../engine/piggy/PiggyServer.h"
+#include "engine/piggy/PiggyServer.h"
+#include "engine/piggy/Sessionmanager.h"
 
-// ── Key generation — prefixed with "peaseernest" then 52 random hex chars ────
+// ── Key generation ────────────────────────────────────────────────────────────
 
-static QString generateKey(const QString &name) {
+static QString generateKey() {
     QString a = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
     QString b = QUuid::createUuid().toString(QUuid::WithoutBraces).remove('-');
-    QString random = (a + b).left(53); // 53 random chars
-    return "peaseernest" + random;     // "peaseernest" = 11 chars + 53 = 64 total
+    return "peaseernest" + (a + b).left(53);
 }
 
+// Key file lives in cwd, not in binary dir, so each project gets its own key.
 static QString keyFilePath(const QString &name) {
-    return QDir(QCoreApplication::applicationDirPath()).filePath(name + ".piggy");
+    return SessionManager::workDir() + "/" + name + ".piggy";
 }
 
 static std::pair<QString, QString> loadExistingKey() {
-    QDir dir(QCoreApplication::applicationDirPath());
+    QDir dir(SessionManager::workDir());
     QStringList files = dir.entryList({"*.piggy"}, QDir::Files);
     if (files.isEmpty()) return {"", ""};
     QFile f(dir.filePath(files.first()));
@@ -45,16 +46,13 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "  ██╔═══╝ ██║██║   ██║██║   ██║  ╚██╔╝  \n";
     out << "  ██║     ██║╚██████╔╝╚██████╔╝   ██║   \n";
     out << "  ╚═╝     ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   \n";
-    out << "  Headless Browser Daemon\n\n";
+    out << "  Headless Browser Daemon\n";
+    out << "  Working dir: " << SessionManager::workDir() << "\n\n";
 
     out << "Mode? (socket/http): ";
     out.flush();
     QString mode = in.readLine().trimmed().toLower();
-
-    if (mode != "http" && mode != "socket") {
-        out << "Invalid — defaulting to socket\n";
-        mode = "socket";
-    }
+    if (mode != "http" && mode != "socket") { mode = "socket"; }
 
     if (mode == "socket") {
         out << "\n[Piggy] Starting in socket mode...\n";
@@ -67,7 +65,7 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     QString name = in.readLine().trimmed();
     if (name.isEmpty()) name = "default";
 
-    QString key  = generateKey(name);
+    QString key  = generateKey();
     QString path = keyFilePath(name);
 
     QJsonObject obj;
@@ -83,10 +81,12 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "\n";
     out << "  Session : " << name << "\n";
     out << "  Key     : " << key  << "\n";
-    out << "  Saved to: " << path << "\n";
-    out << "\n";
-    out << "  Keep your key safe — it will not be shown again.\n";
-    out << "  To reset: delete " << path << " and restart.\n\n";
+    out << "  Saved to: " << path << "\n\n";
+    out << "  Data files will be in: " << SessionManager::workDir() << "\n";
+    out << "    cookies.json  — persistent cookies (always on)\n";
+    out << "    profile.json  — browser identity (always on)\n";
+    out << "    ws.json       — WebSocket frames (opt-in)\n";
+    out << "    pings.json    — ping log (opt-in)\n\n";
     out.flush();
 
     return {"http", name, key};
@@ -116,7 +116,8 @@ int main(int argc, char *argv[]) {
         mode = "http";
         name = ename;
         key  = ekey;
-        qInfo() << "[Piggy] Loaded session:" << name;
+        qInfo() << "[Piggy] Session:" << name;
+        qInfo() << "[Piggy] Working dir:" << SessionManager::workDir();
         qInfo() << "[Piggy] HTTP mode — port 2005";
     } else {
         auto [m, n, k] = firstRunSetup();
@@ -134,7 +135,6 @@ int main(int argc, char *argv[]) {
     if (mode == "http") {
         server.startHttp(key);
         qInfo() << "[Piggy] HTTP API ready on port 2005";
-        qInfo() << "[Piggy] Session:" << name;
     } else {
         qInfo() << "[Piggy] Socket ready:" << PiggyServer::SOCKET_NAME;
     }
