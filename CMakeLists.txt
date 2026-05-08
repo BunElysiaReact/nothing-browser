@@ -64,7 +64,7 @@ set(DEVTOOLS_SOURCES
 )
 
 # ── Full browser ──────────────────────────────────────────────────────────────
-add_executable(nothing-browser
+add_executable(nothing-browser WIN32
     core/main.cpp
     core/app/MainWindow.cpp
     core/tabs/BrowserTab.cpp
