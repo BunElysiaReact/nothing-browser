@@ -125,8 +125,6 @@ void PiggyDialogHandler::broadcastEvent(const QJsonObject &event) {
     }
 }
 
-void PiggyDialogHandler::onJavaScriptConsoleMessage(
-    int, const QString &, int, const QString &) {}
 
 // ─── Command handler ──────────────────────────────────────────────────────────
 
