@@ -276,6 +276,11 @@ jobs:
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser.exe"
+          # Fix: copy offscreen platform plugin so headless/windowless mode works
+          $platformsDst = "$outDir\platforms"
+          if (-not (Test-Path $platformsDst)) { New-Item -ItemType Directory -Force $platformsDst }
+          $offscreen = Join-Path $env:QT_ROOT "plugins\platforms\qoffscreen.dll"
+          if (Test-Path $offscreen) { Copy-Item $offscreen "$platformsDst\" -Force }
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
@@ -293,6 +298,11 @@ jobs:
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headless.exe"
+          # Fix: copy offscreen platform plugin so headless/windowless mode works
+          $platformsDst = "$outDir\platforms"
+          if (-not (Test-Path $platformsDst)) { New-Item -ItemType Directory -Force $platformsDst }
+          $offscreen = Join-Path $env:QT_ROOT "plugins\platforms\qoffscreen.dll"
+          if (Test-Path $offscreen) { Copy-Item $offscreen "$platformsDst\" -Force }
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }
@@ -310,6 +320,11 @@ jobs:
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headful.exe"
+          # Fix: copy offscreen platform plugin so headless/windowless mode works
+          $platformsDst = "$outDir\platforms"
+          if (-not (Test-Path $platformsDst)) { New-Item -ItemType Directory -Force $platformsDst }
+          $offscreen = Join-Path $env:QT_ROOT "plugins\platforms\qoffscreen.dll"
+          if (Test-Path $offscreen) { Copy-Item $offscreen "$platformsDst\" -Force }
           @("QtWebEngineProcess.exe","resources","translations\qtwebengine_locales") | ForEach-Object {
             $src = Join-Path $env:QT_ROOT $_
             if (Test-Path $src) { Copy-Item -Recurse -Force $src "$outDir\" }

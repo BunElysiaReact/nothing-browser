@@ -11,6 +11,9 @@
 #include <QTcpSocket>
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
+#include "PiggyCaptcha.h"
+#include "PiggyDialog.h"
+
 
 void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket *client);
 QString piggy_createTab(PiggyServer *srv);
@@ -34,6 +37,10 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     m_session = new SessionManager(profile, this);
     m_session->load();
     piggy_wireProxyEvents(this);
+
+    // ── NEW: initialize captcha + dialog singletons ──────────────────────────
+    piggy_captchaDetectorInit(this);
+    piggy_dialogHandlerInit(this);
 }
 
 PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
@@ -42,6 +49,10 @@ PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
     m_session = new SessionManager(page->profile(), this);
     m_session->load();
     piggy_wireProxyEvents(this);
+
+    // ── NEW: initialize captcha + dialog singletons ──────────────────────────
+    piggy_captchaDetectorInit(this);
+    piggy_dialogHandlerInit(this);
 }
 
 PiggyServer::~PiggyServer() { stop(); }

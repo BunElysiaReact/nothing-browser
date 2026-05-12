@@ -4,6 +4,8 @@
 #include "../Interceptor.h"
 #include "../FingerprintSpoofer.h"
 #include "Sessionmanager.h"
+#include "PiggyCaptcha.h"
+#include "PiggyDialog.h"
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -227,6 +229,10 @@ QString piggy_createTab(PiggyServer *srv) {
             }
         });
 
+    // ── NEW: watch for captcha + dialogs ─────────────────────────────────────
+    if (piggy_captchaDetector()) piggy_captchaDetector()->watchTab(id, p);
+    if (piggy_dialogHandler())   piggy_dialogHandler()->watchTab(id, p);
+
     TabContext ctx;
     ctx.page        = p;
     ctx.interceptor = interceptor;
@@ -243,6 +249,11 @@ QString piggy_createTab(PiggyServer *srv) {
 void piggy_closeTab(PiggyServer *srv, const QString &tabId) {
     if (!srv->tabs().contains(tabId)) return;
     TabContext &ctx = srv->tabs()[tabId];
+
+    // ── NEW: stop watching ────────────────────────────────────────────────────
+    if (piggy_captchaDetector()) piggy_captchaDetector()->unwatchTab(tabId);
+    if (piggy_dialogHandler())   piggy_dialogHandler()->unwatchTab(tabId);
+
     ctx.page->deleteLater();
     ctx.interceptor->deleteLater();
     ctx.capture->deleteLater();

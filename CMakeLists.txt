@@ -36,6 +36,13 @@ set(PIGGY_SOURCES
     core/engine/piggy/PiggyMedia.cpp           # screenshot, pdf, image blocking
     core/engine/piggy/PiggyProxy.cpp           # all proxy.* commands + event wiring
     core/engine/piggy/PiggyHttp.cpp
+    core/engine/piggy/PiggyCaptcha.cpp         # captcha detection
+    core/engine/piggy/PiggyDialog.cpp          # dialog handling
+    core/engine/piggy/PiggyFind.cpp            # find/search in page
+    core/engine/piggy/PiggyHuman.cpp           # human-like interactions
+    core/engine/piggy/PiggyIframe.cpp          # iframe handling
+    core/engine/piggy/PiggyProvide.cpp         # data provision
+    core/engine/piggy/PiggyWait.cpp            # wait utilities
 )
 
 # ── Other shared sources ──────────────────────────────────────────────────────
@@ -49,7 +56,7 @@ set(SHARED_SOURCES
     core/engine/ProxyManager.cpp
     core/tabs/PiggyTab.cpp
     ${PIGGY_SOURCES}
-    core/engine/piggy/Sessionmanager.cpp   # ← new
+    core/engine/piggy/Sessionmanager.cpp
 )
 
 

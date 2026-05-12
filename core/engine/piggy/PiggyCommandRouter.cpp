@@ -1,5 +1,12 @@
 #include "PiggyServer.h"
 #include "PiggyProxy.h"
+#include "PiggyFind.h"
+#include "PiggyProvide.h"
+#include "PiggyCaptcha.h"
+#include "PiggyWait.h"
+#include "PiggyDialog.h"
+#include "PiggyIframe.h"
+#include "PiggyHuman.h"
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QJsonArray>
@@ -64,6 +71,55 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         return;
     }
 
+    // ── Find API (find.*) ─────────────────────────────────────────────────────
+    if (c.startsWith("find.")) {
+        piggy_handleFind(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Provide API (provide.*) ───────────────────────────────────────────────
+    if (c.startsWith("provide.")) {
+        piggy_handleProvide(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Captcha + Block (captcha.* / block.*) ─────────────────────────────────
+    if (c.startsWith("captcha.") || c.startsWith("block.")) {
+        piggy_handleCaptcha(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Dialog + Upload (dialog.* / upload) ───────────────────────────────────
+    if (c.startsWith("dialog.") || c == "upload") {
+        piggy_handleDialog(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Iframe (iframe.*) ─────────────────────────────────────────────────────
+    if (c.startsWith("iframe.")) {
+        piggy_handleIframe(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Human behavior (human.*) ──────────────────────────────────────────────
+    if (c.startsWith("human.")) {
+        piggy_handleHuman(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Extended wait + fetch (wait.function, fetch.textAll, fetch.attr, etc) ─
+    // NOTE: must come BEFORE navigation, since wait.selector is overridden here
+    // with state support. PiggyNavigation's wait.selector handles the fallback.
+    if (c == "wait.function"   ||
+        c == "wait.selector"   ||
+        c == "fetch.textAll"   ||
+        c == "fetch.attr"      ||
+        c == "fetch.attrAll"   ||
+        (c == "evaluate" && payload.contains("timeout")))
+    {
+        if (piggy_handleWait(srv, c, payload, client, id, tabId)) return;
+    }
+
     // ── Navigation ───────────────────────────────────────────────────────────
     if (piggy_handleNavigation(srv, c, payload, client, id, tabId)) return;
 
@@ -73,15 +129,19 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
     // ── Capture ───────────────────────────────────────────────────────────────
     if (piggy_handleCapture(srv, c, payload, client, id, tabId)) return;
 
+    // ── Human type override (type with clear:true) ────────────────────────────
+    if (c == "type" && payload["clear"].toBool(false)) {
+        if (piggy_handleHuman(srv, c, payload, client, id, tabId)) return;
+    }
+
     // ── Interaction ───────────────────────────────────────────────────────────
     if (piggy_handleInteraction(srv, c, payload, client, id, tabId)) return;
 
     // ── Export / session / cookie / init script / expose ─────────────────────
-    // This handles: fetch.*, search.*, cookie.*, session.*, intercept.*,
-    //               expose.*, exposed.*, addInitScript
-    // All new session.* commands (session.ws.save, session.pings.save,
-    // session.paths, session.ws.path, session.pings.path) land here.
     if (piggy_handleExport(srv, c, payload, client, id, tabId)) return;
+
+    // ── Wait (remaining — evaluate without timeout, wait.response) ────────────
+    if (piggy_handleWait(srv, c, payload, client, id, tabId)) return;
 
     // ── Unknown ───────────────────────────────────────────────────────────────
     srv->respond(client, id, false, "unknown command: " + c);
