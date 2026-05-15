@@ -43,79 +43,60 @@ bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
         return true;
     }
 
-        if (c == "go.back") {
-            if (!p->history()->canGoBack()) {
-                srv->respond(client, id, false, "no history to go back");
-                return true;
-            }
-
-            auto *timer = new QTimer(srv);
-            timer->setSingleShot(true);
-            timer->setInterval(5000);
-
-            auto *conn = new QMetaObject::Connection();
-            *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
-                [srv, client, id, timer, conn](bool ok) {
-                    timer->stop();
-                    timer->deleteLater();
-                    QObject::disconnect(*conn);
-                    delete conn;
-                    srv->respond(client, id, ok, ok ? "back" : "back failed");
-                });
-
-            QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
-                QObject::disconnect(*conn);
-                delete conn;
-                timer->deleteLater();
-                srv->respond(client, id, true, "back"); // treat timeout as success — page likely loaded
-            });
-
-            timer->start();
-            p->triggerAction(QWebEnginePage::Back);
-            return true;
-        }
+    if (c == "go.back") {
         if (!p->history()->canGoBack()) {
             srv->respond(client, id, false, "no history to go back");
             return true;
         }
-        QObject::connect(p, &QWebEnginePage::loadFinished, srv,
-            [srv, client, id](bool ok) {
+        auto *timer = new QTimer(srv);
+        timer->setSingleShot(true);
+        timer->setInterval(5000);
+        auto *conn = new QMetaObject::Connection();
+        *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
+            [srv, client, id, timer, conn](bool ok) {
+                timer->stop();
+                timer->deleteLater();
+                QObject::disconnect(*conn);
+                delete conn;
                 srv->respond(client, id, ok, ok ? "back" : "back failed");
-            }, Qt::SingleShotConnection);
+            });
+        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
+            QObject::disconnect(*conn);
+            delete conn;
+            timer->deleteLater();
+            srv->respond(client, id, true, "back");
+        });
+        timer->start();
         p->triggerAction(QWebEnginePage::Back);
         return true;
     }
 
     if (c == "go.forward") {
-    if (!p->history()->canGoForward()) {
-        srv->respond(client, id, false, "no history to go forward");
-        return true;
-    }
-
-    auto *timer = new QTimer(srv);
-    timer->setSingleShot(true);
-    timer->setInterval(5000);
-
-    auto *conn = new QMetaObject::Connection();
-    *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
-        [srv, client, id, timer, conn](bool ok) {
-            timer->stop();
-            timer->deleteLater();
+        if (!p->history()->canGoForward()) {
+            srv->respond(client, id, false, "no history to go forward");
+            return true;
+        }
+        auto *timer = new QTimer(srv);
+        timer->setSingleShot(true);
+        timer->setInterval(5000);
+        auto *conn = new QMetaObject::Connection();
+        *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
+            [srv, client, id, timer, conn](bool ok) {
+                timer->stop();
+                timer->deleteLater();
+                QObject::disconnect(*conn);
+                delete conn;
+                srv->respond(client, id, ok, ok ? "forward" : "forward failed");
+            });
+        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
             QObject::disconnect(*conn);
             delete conn;
-            srv->respond(client, id, ok, ok ? "forward" : "forward failed");
+            timer->deleteLater();
+            srv->respond(client, id, true, "forward");
         });
-
-    QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
-        QObject::disconnect(*conn);
-        delete conn;
-        timer->deleteLater();
-        srv->respond(client, id, true, "forward");
-    });
-
-    timer->start();
-    p->triggerAction(QWebEnginePage::Forward);
-    return true;
+        timer->start();
+        p->triggerAction(QWebEnginePage::Forward);
+        return true;
     }
 
     if (c == "page.url") {
