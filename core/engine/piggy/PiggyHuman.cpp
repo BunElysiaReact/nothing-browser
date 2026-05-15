@@ -16,15 +16,12 @@ static void humanType(PiggyServer *srv, QLocalSocket *client, const QString &id,
                       QWebEnginePage *p, const QString &selector,
                       const QString &text, bool clear, int delayMs)
 {
-    // Step 1: optionally clear the field
     auto doType = [srv, client, id, p, selector, text, delayMs]() {
         if (text.isEmpty()) {
             srv->respond(client, id, true, "typed (empty)");
             return;
         }
 
-        // We build a sequence of delayed runJavaScript calls, one per character.
-        // Each char event simulates: keydown → keypress → input → keyup.
         struct TypeCtx {
             int index = 0;
             QString text;
@@ -38,7 +35,6 @@ static void humanType(PiggyServer *srv, QLocalSocket *client, const QString &id,
         ctx->selector.replace("'", "\\'");
         ctx->delayMs  = delayMs;
 
-        // First: focus and place cursor at end
         QString focusJs = QString(
             "(function(){"
             "var el=document.querySelector('%1');"
@@ -56,9 +52,9 @@ static void humanType(PiggyServer *srv, QLocalSocket *client, const QString &id,
                 return;
             }
 
-            // Recursive char sender via QTimer
-            std::function<void()> sendNext;
-            sendNext = [srv, client, id, p, ctx, sendNext = std::function<void()>()]() mutable {
+            // Use shared_ptr to hold the function so recursion works safely
+            auto sendNext = std::make_shared<std::function<void()>>();
+            *sendNext = [srv, client, id, p, ctx, sendNext]() mutable {
                 if (ctx->done) return;
                 if (ctx->index >= ctx->text.length()) {
                     ctx->done = true;
@@ -70,7 +66,6 @@ static void humanType(PiggyServer *srv, QLocalSocket *client, const QString &id,
                 QChar ch = ctx->text[ctx->index++];
                 QString escaped = ch == '\'' ? "\\'" : (ch == '\\' ? "\\\\" : QString(ch));
 
-                // Build key sequence for this char
                 QString js = QString(
                     "(function(){"
                     "var el=document.querySelector('%1');"
@@ -87,19 +82,20 @@ static void humanType(PiggyServer *srv, QLocalSocket *client, const QString &id,
 
                 p->runJavaScript(js, [srv, client, id, p, ctx, sendNext](const QVariant &) mutable {
                     if (ctx->done) return;
-                    // Add jitter: ±30% of base delay
-                    int jitter = QRandomGenerator::global()->bounded(ctx->delayMs / 3);
-                    int delay  = ctx->delayMs - ctx->delayMs/6 + jitter;
-                    QTimer::singleShot(delay, [sendNext]() mutable { sendNext(); });
+                    int delay = ctx->delayMs;
+                    if (delay > 2) {
+                        int jitter = QRandomGenerator::global()->bounded(delay / 3);
+                        delay = delay - delay / 6 + jitter;
+                    }
+                    QTimer::singleShot(delay, [sendNext]() mutable { (*sendNext)(); });
                 });
             };
 
-            sendNext();
+            (*sendNext)();
         });
     };
 
     if (clear) {
-        // Ctrl+A then Delete to clear
         QString clearJs = QString(
             "(function(){"
             "var el=document.querySelector('%1');"
