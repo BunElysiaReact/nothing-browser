@@ -12,39 +12,56 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
     auto *p = piggy_page(srv, tabId);
 
     if (c == "click") {
+        QString sel = payload["selector"].toString();
+        sel.replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
             "if(el){el.click();return true;} return false; })()"
-        ).arg(payload["selector"].toString());
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "clicked" : "element not found");
+        });
         return true;
     }
 
     if (c == "dblclick") {
+        QString sel = payload["selector"].toString();
+        sel.replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));"
             "return true; })()"
-        ).arg(payload["selector"].toString());
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "dblclicked" : "element not found");
+        });
         return true;
     }
 
     if (c == "hover") {
+        QString sel = payload["selector"].toString();
+        sel.replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));"
             "el.dispatchEvent(new MouseEvent('mouseenter',{bubbles:false}));"
             "return true; })()"
-        ).arg(payload["selector"].toString());
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "hovered" : "element not found");
+        });
         return true;
     }
 
     if (c == "type") {
+        QString sel  = payload["selector"].toString();
         QString text = payload["text"].toString();
+        sel.replace("'", "\\'");
         text.replace("\\", "\\\\").replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
@@ -53,13 +70,18 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
             "el.dispatchEvent(new Event('input',{bubbles:true}));"
             "el.dispatchEvent(new Event('change',{bubbles:true}));"
             "return true; })()"
-        ).arg(payload["selector"].toString(), text);
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel, text);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "typed" : "element not found");
+        });
         return true;
     }
 
     if (c == "select") {
+        QString sel = payload["selector"].toString();
         QString val = payload["value"].toString();
+        sel.replace("'", "\\'");
         val.replace("\\", "\\\\").replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
@@ -67,19 +89,27 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
             "el.value='%2';"
             "el.dispatchEvent(new Event('change',{bubbles:true}));"
             "return true; })()"
-        ).arg(payload["selector"].toString(), val);
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel, val);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "selected" : "element not found");
+        });
         return true;
     }
 
     if (c == "scroll.to") {
+        QString sel = payload["selector"].toString();
+        sel.replace("'", "\\'");
         QString js = QString(
             "(function(){ var el=document.querySelector('%1');"
             "if(!el) return false;"
             "el.scrollIntoView({behavior:'smooth',block:'center'});"
             "return true; })()"
-        ).arg(payload["selector"].toString());
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        ).arg(sel);
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "scrolled" : "element not found");
+        });
         return true;
     }
 
@@ -87,7 +117,9 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
         int px = payload["px"].toInt(300);
         p->runJavaScript(
             QString("window.scrollBy({top:%1,behavior:'smooth'}); true;").arg(px),
-            [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+            [srv, client, id](const QVariant &r) {
+                srv->respond(client, id, true, r);
+            });
         return true;
     }
 
@@ -102,7 +134,10 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
             "});"
             "return true; })()"
         ).arg(key);
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "pressed" : "key press failed");
+        });
         return true;
     }
 
@@ -126,7 +161,10 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
               ctrl  ? "true" : "false",
               shift ? "true" : "false",
               alt   ? "true" : "false");
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "combo sent" : "combo failed");
+        });
         return true;
     }
 
@@ -135,7 +173,9 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
         p->runJavaScript(
             QString("document.dispatchEvent(new MouseEvent('mousemove',{clientX:%1,clientY:%2,bubbles:true})); true;")
                 .arg(x).arg(y),
-            [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+            [srv, client, id](const QVariant &r) {
+                srv->respond(client, id, true, r);
+            });
         return true;
     }
 
@@ -152,13 +192,18 @@ bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
             "document.dispatchEvent(new MouseEvent('mouseup',  {clientX:%3,clientY:%4,bubbles:true}));"
             "return true; })()"
         ).arg(fx).arg(fy).arg(tx).arg(ty);
-        p->runJavaScript(js, [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+        p->runJavaScript(js, [srv, client, id](const QVariant &r) {
+            bool ok = r.toBool();
+            srv->respond(client, id, ok, ok ? "dragged" : "drag failed");
+        });
         return true;
     }
 
     if (c == "evaluate") {
         p->runJavaScript(payload["js"].toString(),
-            [srv, client, id](const QVariant &r) { srv->respond(client, id, true, r); });
+            [srv, client, id](const QVariant &r) {
+                srv->respond(client, id, true, r);
+            });
         return true;
     }
 
