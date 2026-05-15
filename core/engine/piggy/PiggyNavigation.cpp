@@ -2,6 +2,7 @@
 #include "../../tabs/PiggyTab.h"
 #include <QWebEnginePage>
 #include <QWebEngineHistory>
+#include <QWebEngineLoadingInfo>
 #include <QTimer>
 #include <QJsonDocument>
 
@@ -50,21 +51,22 @@ bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
         }
         auto *timer = new QTimer(srv);
         timer->setSingleShot(true);
-        timer->setInterval(5000);
+        timer->setInterval(15000);
         auto *conn = new QMetaObject::Connection();
-        *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
-            [srv, client, id, timer, conn](bool ok) {
+        *conn = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
+            [srv, client, id, timer, conn](const QWebEngineLoadingInfo &info) {
+                if (info.status() != QWebEngineLoadingInfo::LoadSucceededStatus) return;
                 timer->stop();
                 timer->deleteLater();
                 QObject::disconnect(*conn);
                 delete conn;
-                srv->respond(client, id, ok, ok ? "back" : "back failed");
+                srv->respond(client, id, true, "back");
             });
         QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
             QObject::disconnect(*conn);
             delete conn;
             timer->deleteLater();
-            srv->respond(client, id, true, "back");
+            srv->respond(client, id, false, "go.back timeout");
         });
         timer->start();
         p->triggerAction(QWebEnginePage::Back);
@@ -78,21 +80,22 @@ bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
         }
         auto *timer = new QTimer(srv);
         timer->setSingleShot(true);
-        timer->setInterval(5000);
+        timer->setInterval(15000);
         auto *conn = new QMetaObject::Connection();
-        *conn = QObject::connect(p, &QWebEnginePage::loadFinished, srv,
-            [srv, client, id, timer, conn](bool ok) {
+        *conn = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
+            [srv, client, id, timer, conn](const QWebEngineLoadingInfo &info) {
+                if (info.status() != QWebEngineLoadingInfo::LoadSucceededStatus) return;
                 timer->stop();
                 timer->deleteLater();
                 QObject::disconnect(*conn);
                 delete conn;
-                srv->respond(client, id, ok, ok ? "forward" : "forward failed");
+                srv->respond(client, id, true, "forward");
             });
         QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
             QObject::disconnect(*conn);
             delete conn;
             timer->deleteLater();
-            srv->respond(client, id, true, "forward");
+            srv->respond(client, id, false, "go.forward timeout");
         });
         timer->start();
         p->triggerAction(QWebEnginePage::Forward);
