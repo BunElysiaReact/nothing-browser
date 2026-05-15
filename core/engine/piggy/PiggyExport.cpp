@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QTimer>
+#include <QFile>
 
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 
@@ -112,6 +113,9 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
     }
 
     if (c == "cookie.get") {
+        // Qt6 removed QWebEngineCookieStore::getAllCookies().
+        // SessionManager already mirrors every cookie to cookies.json on disk,
+        // so we read from there — it's always in sync.
         QString name   = payload["name"].toString();
         QString domain = payload["domain"].toString();
 
@@ -120,45 +124,30 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
             return true;
         }
 
-        auto *store   = piggy_page(srv, tabId)->profile()->cookieStore();
-        auto *found   = new QNetworkCookie();
-        auto *matched = new bool(false);
+        if (!srv->session()) {
+            srv->respond(client, id, false, "no session manager");
+            return true;
+        }
 
-        // cookieAdded fires once per cookie when getAllCookies() is called.
-        // We connect, flush all cookies, then respond after a short delay.
-        auto conn = std::make_shared<QMetaObject::Connection>();
-        *conn = QObject::connect(store, &QWebEngineCookieStore::cookieAdded, srv,
-            [name, domain, found, matched, conn](const QNetworkCookie &c) {
-                if (*matched) return;
-                bool nameMatch   = (c.name() == name.toUtf8());
-                bool domainMatch = domain.isEmpty() || c.domain().contains(domain);
-                if (nameMatch && domainMatch) {
-                    *found   = c;
-                    *matched = true;
-                    QObject::disconnect(*conn);
-                }
-            });
+        QFile f(SessionManager::cookiesPath());
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            srv->respond(client, id, false, "could not read cookies.json");
+            return true;
+        }
+        QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        f.close();
 
-        store->getAllCookies();
-
-        QTimer::singleShot(250, srv, [srv, client, id, found, matched]() {
-            if (*matched) {
-                QJsonObject o;
-                o["name"]     = QString::fromUtf8(found->name());
-                o["value"]    = QString::fromUtf8(found->value());
-                o["domain"]   = found->domain();
-                o["path"]     = found->path();
-                o["httpOnly"] = found->isHttpOnly();
-                o["secure"]   = found->isSecure();
-                if (found->expirationDate().isValid())
-                    o["expires"] = found->expirationDate().toSecsSinceEpoch();
+        QJsonArray arr = doc.isArray() ? doc.array() : QJsonArray();
+        for (const QJsonValue &v : arr) {
+            QJsonObject o = v.toObject();
+            bool nameMatch   = (o["name"].toString() == name);
+            bool domainMatch = domain.isEmpty() || o["domain"].toString().contains(domain);
+            if (nameMatch && domainMatch) {
                 srv->respond(client, id, true, o);
-            } else {
-                srv->respond(client, id, false, "cookie not found");
+                return true;
             }
-            delete found;
-            delete matched;
-        });
+        }
+        srv->respond(client, id, false, "cookie not found");
         return true;
     }
 
@@ -181,36 +170,39 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
     }
 
     if (c == "cookie.list") {
-        QString domainFilter = payload["domain"].toString(); // optional filter
+        // Qt6 removed QWebEngineCookieStore::getAllCookies().
+        // Read from SessionManager's cookies.json which is always kept in sync.
+        QString domainFilter = payload["domain"].toString();
 
-        auto *store   = piggy_page(srv, tabId)->profile()->cookieStore();
-        auto *cookies = new QJsonArray();
-        auto *conn    = new QMetaObject::Connection();
+        if (!srv->session()) {
+            srv->respond(client, id, false, "no session manager");
+            return true;
+        }
 
-        *conn = QObject::connect(store, &QWebEngineCookieStore::cookieAdded, srv,
-            [cookies, domainFilter](const QNetworkCookie &c) {
-                if (!domainFilter.isEmpty() && !c.domain().contains(domainFilter))
-                    return;
-                QJsonObject o;
-                o["name"]     = QString::fromUtf8(c.name());
-                o["value"]    = QString::fromUtf8(c.value());
-                o["domain"]   = c.domain();
-                o["path"]     = c.path();
-                o["httpOnly"] = c.isHttpOnly();
-                o["secure"]   = c.isSecure();
-                if (c.expirationDate().isValid())
-                    o["expires"] = c.expirationDate().toSecsSinceEpoch();
-                cookies->append(o);
-            });
+        QFile f(SessionManager::cookiesPath());
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            // File doesn't exist yet — return empty array, not an error
+            srv->respond(client, id, true, QJsonArray());
+            return true;
+        }
+        QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+        f.close();
 
-        store->getAllCookies();
+        QJsonArray all = doc.isArray() ? doc.array() : QJsonArray();
 
-        QTimer::singleShot(250, srv, [srv, client, id, cookies, conn]() {
-            QObject::disconnect(*conn);
-            srv->respond(client, id, true, *cookies);
-            delete cookies;
-            delete conn;
-        });
+        if (domainFilter.isEmpty()) {
+            srv->respond(client, id, true, all);
+            return true;
+        }
+
+        // Filter by domain
+        QJsonArray filtered;
+        for (const QJsonValue &v : all) {
+            QJsonObject o = v.toObject();
+            if (o["domain"].toString().contains(domainFilter))
+                filtered.append(o);
+        }
+        srv->respond(client, id, true, filtered);
         return true;
     }
 
