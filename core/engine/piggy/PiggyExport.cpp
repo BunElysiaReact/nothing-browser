@@ -11,6 +11,7 @@
 #include <QNetworkCookie>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QTimer>
 
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 
@@ -111,7 +112,53 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
     }
 
     if (c == "cookie.get") {
-        srv->respond(client, id, false, "cookie.get not implemented (async)");
+        QString name   = payload["name"].toString();
+        QString domain = payload["domain"].toString();
+
+        if (name.isEmpty()) {
+            srv->respond(client, id, false, "cookie.get requires name");
+            return true;
+        }
+
+        auto *store   = piggy_page(srv, tabId)->profile()->cookieStore();
+        auto *found   = new QNetworkCookie();
+        auto *matched = new bool(false);
+
+        // cookieAdded fires once per cookie when getAllCookies() is called.
+        // We connect, flush all cookies, then respond after a short delay.
+        auto conn = std::make_shared<QMetaObject::Connection>();
+        *conn = QObject::connect(store, &QWebEngineCookieStore::cookieAdded, srv,
+            [name, domain, found, matched, conn](const QNetworkCookie &c) {
+                if (*matched) return;
+                bool nameMatch   = (c.name() == name.toUtf8());
+                bool domainMatch = domain.isEmpty() || c.domain().contains(domain);
+                if (nameMatch && domainMatch) {
+                    *found   = c;
+                    *matched = true;
+                    QObject::disconnect(*conn);
+                }
+            });
+
+        store->getAllCookies();
+
+        QTimer::singleShot(250, srv, [srv, client, id, found, matched]() {
+            if (*matched) {
+                QJsonObject o;
+                o["name"]     = QString::fromUtf8(found->name());
+                o["value"]    = QString::fromUtf8(found->value());
+                o["domain"]   = found->domain();
+                o["path"]     = found->path();
+                o["httpOnly"] = found->isHttpOnly();
+                o["secure"]   = found->isSecure();
+                if (found->expirationDate().isValid())
+                    o["expires"] = found->expirationDate().toSecsSinceEpoch();
+                srv->respond(client, id, true, o);
+            } else {
+                srv->respond(client, id, false, "cookie not found");
+            }
+            delete found;
+            delete matched;
+        });
         return true;
     }
 
@@ -134,7 +181,36 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
     }
 
     if (c == "cookie.list") {
-        srv->respond(client, id, false, "cookie.list not implemented");
+        QString domainFilter = payload["domain"].toString(); // optional filter
+
+        auto *store   = piggy_page(srv, tabId)->profile()->cookieStore();
+        auto *cookies = new QJsonArray();
+        auto *conn    = new QMetaObject::Connection();
+
+        *conn = QObject::connect(store, &QWebEngineCookieStore::cookieAdded, srv,
+            [cookies, domainFilter](const QNetworkCookie &c) {
+                if (!domainFilter.isEmpty() && !c.domain().contains(domainFilter))
+                    return;
+                QJsonObject o;
+                o["name"]     = QString::fromUtf8(c.name());
+                o["value"]    = QString::fromUtf8(c.value());
+                o["domain"]   = c.domain();
+                o["path"]     = c.path();
+                o["httpOnly"] = c.isHttpOnly();
+                o["secure"]   = c.isSecure();
+                if (c.expirationDate().isValid())
+                    o["expires"] = c.expirationDate().toSecsSinceEpoch();
+                cookies->append(o);
+            });
+
+        store->getAllCookies();
+
+        QTimer::singleShot(250, srv, [srv, client, id, cookies, conn]() {
+            QObject::disconnect(*conn);
+            srv->respond(client, id, true, *cookies);
+            delete cookies;
+            delete conn;
+        });
         return true;
     }
 
@@ -170,8 +246,6 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // Return all data file paths at once — useful for the JS library to show
-    // the user where everything is on startup.
     if (c == "session.paths") {
         QJsonObject paths;
         paths["workDir"]  = SessionManager::workDir();
@@ -183,7 +257,6 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // Enable / disable ws.json persistence (opt-in)
     if (c == "session.ws.save") {
         bool on = payload["enabled"].toBool(true);
         if (srv->session()) srv->session()->setSaveWs(on);
@@ -191,7 +264,6 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
         return true;
     }
 
-    // Enable / disable pings.json persistence (opt-in)
     if (c == "session.pings.save") {
         bool on = payload["enabled"].toBool(true);
         if (srv->session()) srv->session()->setSavePings(on);

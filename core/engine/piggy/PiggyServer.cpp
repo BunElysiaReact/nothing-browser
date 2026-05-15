@@ -38,7 +38,6 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
     m_session->load();
     piggy_wireProxyEvents(this);
 
-    // ── NEW: initialize captcha + dialog singletons ──────────────────────────
     piggy_captchaDetectorInit(this);
     piggy_dialogHandlerInit(this);
 }
@@ -50,7 +49,6 @@ PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
     m_session->load();
     piggy_wireProxyEvents(this);
 
-    // ── NEW: initialize captcha + dialog singletons ──────────────────────────
     piggy_captchaDetectorInit(this);
     piggy_dialogHandlerInit(this);
 }
@@ -109,19 +107,35 @@ void PiggyServer::onNewConnection() {
 
 void PiggyServer::onClientDisconnected() {
     auto *client = qobject_cast<QLocalSocket*>(sender());
-    if (client) { m_clients.removeAll(client); client->deleteLater(); }
+    if (client) {
+        m_clients.removeAll(client);
+        m_buffers.remove(client);
+        client->deleteLater();
+    }
 }
 
 void PiggyServer::onClientData() {
     auto *client = qobject_cast<QLocalSocket*>(sender());
     if (!client) return;
-    QByteArray raw = client->readAll();
-    QJsonDocument doc = QJsonDocument::fromJson(raw);
-    if (doc.isNull() || !doc.isObject()) {
-        respond(client, "", false, "Invalid JSON");
-        return;
+
+    m_buffers[client] += client->readAll();
+
+    while (true) {
+        int idx = m_buffers[client].indexOf('\n');
+        if (idx == -1) break;
+
+        QByteArray line = m_buffers[client].left(idx).trimmed();
+        m_buffers[client] = m_buffers[client].mid(idx + 1);
+
+        if (line.isEmpty()) continue;
+
+        QJsonDocument doc = QJsonDocument::fromJson(line);
+        if (doc.isNull() || !doc.isObject()) {
+            respond(client, "", false, "Invalid JSON");
+            continue;
+        }
+        handleCommand(doc.object(), client);
     }
-    handleCommand(doc.object(), client);
 }
 
 void PiggyServer::handleCommand(const QJsonObject &cmd, QLocalSocket *client) {
@@ -207,7 +221,6 @@ void PiggyServer::onWsFrameCaptured(const WebSocketFrame &frame, const QString &
     if (m_tabs[tabId].captureActive) {
         m_tabs[tabId].capturedWsFrames.append(frame);
 
-        // Persist to ws.json in cwd if opt-in is on
         if (m_session && m_session->saveWs()) {
             QJsonObject entry;
             entry["tabId"]        = tabId;

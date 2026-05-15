@@ -109,6 +109,7 @@ private:
     QString            m_apiKey;
     QTcpSocket        *m_pendingHttpSock = nullptr;
 
-    QMap<QString, TabContext> m_tabs;
-    QList<QLocalSocket*>      m_clients;
+    QMap<QString, TabContext>       m_tabs;
+    QList<QLocalSocket*>            m_clients;
+    QMap<QLocalSocket*, QByteArray> m_buffers;  // line buffer per client
 };
