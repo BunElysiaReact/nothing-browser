@@ -49,23 +49,44 @@ bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
             srv->respond(client, id, false, "no history to go back");
             return true;
         }
+
         auto *timer = new QTimer(srv);
-        timer->setSingleShot(true);
-        timer->setInterval(15000);
-        auto *conn = new QMetaObject::Connection();
-        *conn = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
-            [srv, client, id, timer, conn](const QWebEngineLoadingInfo &info) {
+        auto *conn1 = new QMetaObject::Connection();
+        auto *conn2 = new QMetaObject::Connection();
+        auto *fired = new bool(false);
+
+        auto cleanup = [conn1, conn2, timer, fired]() {
+            QObject::disconnect(*conn1); delete conn1;
+            QObject::disconnect(*conn2); delete conn2;
+            timer->stop(); timer->deleteLater();
+            delete fired;
+        };
+
+        // Primary: loadingChanged with LoadSucceededStatus
+        *conn1 = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
+            [srv, client, id, cleanup, fired](const QWebEngineLoadingInfo &info) {
                 if (info.status() != QWebEngineLoadingInfo::LoadSucceededStatus) return;
-                timer->stop();
-                timer->deleteLater();
-                QObject::disconnect(*conn);
-                delete conn;
+                if (*fired) return;
+                *fired = true;
+                cleanup();
                 srv->respond(client, id, true, "back");
             });
-        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
-            QObject::disconnect(*conn);
-            delete conn;
-            timer->deleteLater();
+
+        // Fallback: urlChanged — covers cached pages that skip loadingChanged
+        *conn2 = QObject::connect(p, &QWebEnginePage::urlChanged, srv,
+            [srv, client, id, cleanup, fired](const QUrl &) {
+                if (*fired) return;
+                *fired = true;
+                cleanup();
+                srv->respond(client, id, true, "back");
+            });
+
+        timer->setSingleShot(true);
+        timer->setInterval(15000);
+        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, cleanup, fired]() {
+            if (*fired) return;
+            *fired = true;
+            cleanup();
             srv->respond(client, id, false, "go.back timeout");
         });
         timer->start();
@@ -78,23 +99,44 @@ bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
             srv->respond(client, id, false, "no history to go forward");
             return true;
         }
+
         auto *timer = new QTimer(srv);
-        timer->setSingleShot(true);
-        timer->setInterval(15000);
-        auto *conn = new QMetaObject::Connection();
-        *conn = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
-            [srv, client, id, timer, conn](const QWebEngineLoadingInfo &info) {
+        auto *conn1 = new QMetaObject::Connection();
+        auto *conn2 = new QMetaObject::Connection();
+        auto *fired = new bool(false);
+
+        auto cleanup = [conn1, conn2, timer, fired]() {
+            QObject::disconnect(*conn1); delete conn1;
+            QObject::disconnect(*conn2); delete conn2;
+            timer->stop(); timer->deleteLater();
+            delete fired;
+        };
+
+        // Primary: loadingChanged with LoadSucceededStatus
+        *conn1 = QObject::connect(p, &QWebEnginePage::loadingChanged, srv,
+            [srv, client, id, cleanup, fired](const QWebEngineLoadingInfo &info) {
                 if (info.status() != QWebEngineLoadingInfo::LoadSucceededStatus) return;
-                timer->stop();
-                timer->deleteLater();
-                QObject::disconnect(*conn);
-                delete conn;
+                if (*fired) return;
+                *fired = true;
+                cleanup();
                 srv->respond(client, id, true, "forward");
             });
-        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, conn, timer]() {
-            QObject::disconnect(*conn);
-            delete conn;
-            timer->deleteLater();
+
+        // Fallback: urlChanged — covers cached pages that skip loadingChanged
+        *conn2 = QObject::connect(p, &QWebEnginePage::urlChanged, srv,
+            [srv, client, id, cleanup, fired](const QUrl &) {
+                if (*fired) return;
+                *fired = true;
+                cleanup();
+                srv->respond(client, id, true, "forward");
+            });
+
+        timer->setSingleShot(true);
+        timer->setInterval(15000);
+        QObject::connect(timer, &QTimer::timeout, srv, [srv, client, id, cleanup, fired]() {
+            if (*fired) return;
+            *fired = true;
+            cleanup();
             srv->respond(client, id, false, "go.forward timeout");
         });
         timer->start();

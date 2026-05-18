@@ -10,13 +10,50 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 void piggy_startCapture(PiggyServer *srv, const QString &tabId) {
     if (!srv->tabs().contains(tabId)) return;
     TabContext &ctx = srv->tabs()[tabId];
-    if (!ctx.captureActive) {
-        ctx.page->runJavaScript(NetworkCapture::captureScript());
-        ctx.captureActive = true;
-        qDebug() << "[PiggyServer] Capture started for tab" << tabId;
-    }
-}
+    if (ctx.captureActive) return;
+    ctx.captureActive = true;
 
+    // Inject into current page
+    ctx.page->runJavaScript(NetworkCapture::captureScript());
+
+    // Re-inject on every navigation via init script
+    QWebEngineScript script;
+    script.setName("nothing_capture_" + tabId);
+    script.setSourceCode(NetworkCapture::captureScript());
+    script.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    script.setWorldId(QWebEngineScript::MainWorld);
+    script.setRunsOnSubFrames(false);
+    ctx.page->profile()->scripts()->insert(script);
+
+    // Connect signals to populate capturedRequests
+    if (!ctx.captureConnected) {
+        QObject::connect(ctx.capture, &NetworkCapture::requestCaptured, srv,
+            [srv, tabId](const CapturedRequest &req) {
+                if (!srv->tabs().contains(tabId)) return;
+                if (!srv->tabs()[tabId].captureActive) return;
+                srv->tabs()[tabId].capturedRequests.append(req);
+            });
+        QObject::connect(ctx.capture, &NetworkCapture::wsFrameCaptured, srv,
+            [srv, tabId](const WebSocketFrame &f) {
+                if (!srv->tabs().contains(tabId)) return;
+                if (!srv->tabs()[tabId].captureActive) return;
+                srv->tabs()[tabId].capturedWsFrames.append(f);
+            });
+        QObject::connect(ctx.capture, &NetworkCapture::cookieCaptured, srv,
+            [srv, tabId](const CapturedCookie &ck) {
+                if (!srv->tabs().contains(tabId)) return;
+                srv->tabs()[tabId].capturedCookies.append(ck);
+            });
+        QObject::connect(ctx.capture, &NetworkCapture::storageCaptured, srv,
+            [srv, tabId](const QString &, const QString &key, const QString &value, const QString &) {
+                if (!srv->tabs().contains(tabId)) return;
+                srv->tabs()[tabId].storageEntries.append({key, value});
+            });
+        ctx.captureConnected = true;
+    }
+
+    qDebug() << "[PiggyServer] Capture started for tab" << tabId;
+}
 void piggy_stopCapture(PiggyServer *srv, const QString &tabId) {
     if (!srv->tabs().contains(tabId)) return;
     srv->tabs()[tabId].captureActive = false;
