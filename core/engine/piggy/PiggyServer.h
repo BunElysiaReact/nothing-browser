@@ -7,6 +7,7 @@
 #include <QWebEnginePage>
 #include <QWebEngineProfile>
 #include <QWebEngineScript>
+#include <QWebEngineScriptCollection>
 #include <QWebEngineUrlRequestInterceptor>
 #include <QNetworkCookie>
 #include <QMap>
@@ -36,6 +37,7 @@ struct TabContext {
     QStringList       initScripts;
     bool              imageBlocked     = false;
     bool              captureActive    = false;
+    bool              captureConnected = false;
     bool              exposedConnected = false;
     QStringList       exposedFunctions;
     QVector<InterceptRule>           rules;
@@ -111,5 +113,5 @@ private:
 
     QMap<QString, TabContext>       m_tabs;
     QList<QLocalSocket*>            m_clients;
-    QMap<QLocalSocket*, QByteArray> m_buffers;  // line buffer per client
+    QMap<QLocalSocket*, QByteArray> m_buffers;
 };

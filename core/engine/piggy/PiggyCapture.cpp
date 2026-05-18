@@ -1,6 +1,8 @@
 #include "PiggyServer.h"
 #include "../NetworkCapture.h"
 #include <QWebEnginePage>
+#include <QWebEngineScript>             
+#include <QWebEngineScriptCollection>   
 #include <QJsonArray>
 
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
