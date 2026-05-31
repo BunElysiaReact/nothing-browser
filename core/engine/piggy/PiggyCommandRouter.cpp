@@ -7,12 +7,16 @@
 #include "PiggyDialog.h"
 #include "PiggyIframe.h"
 #include "PiggyHuman.h"
+#include "PiggyQR.h"
+#include "PiggyInnerStorage.h"
+#include "PiggyCookieInject.h"
+#include "PiggyMediaCapture.h"
 #include <QJsonObject>
 #include <QLocalSocket>
 #include <QJsonArray>
 #include <QJsonDocument>
 
-// ─── Forward declarations from split files ────────────────────────────────────
+// ─── Forward declarations ─────────────────────────────────────────────────────
 bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
                              const QJsonObject &payload,
                              QLocalSocket *client, const QString &id,
@@ -40,7 +44,8 @@ bool piggy_handleExport(PiggyServer *srv, const QString &c,
 
 // ─── Main command router ──────────────────────────────────────────────────────
 
-void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket *client) {
+void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd,
+                          QLocalSocket *client) {
     const QString id          = cmd["id"].toString();
     const QString c           = cmd["cmd"].toString();
     const QJsonObject payload = cmd["payload"].toObject();
@@ -52,7 +57,10 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         return;
     }
     if (c == "tab.close") {
-        if (tabId.isEmpty()) { srv->respond(client, id, false, "tab.close requires tabId"); return; }
+        if (tabId.isEmpty()) {
+            srv->respond(client, id, false, "tab.close requires tabId");
+            return;
+        }
         srv->closeTab(tabId);
         srv->respond(client, id, true, "closed");
         return;
@@ -65,19 +73,19 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         return;
     }
 
-    // ── Proxy commands (proxy.*) ──────────────────────────────────────────────
+    // ── Proxy (proxy.*) ───────────────────────────────────────────────────────
     if (c.startsWith("proxy.")) {
         piggy_handleProxy(srv, c, payload, client, id);
         return;
     }
 
-    // ── Find API (find.*) ─────────────────────────────────────────────────────
+    // ── Find (find.*) ─────────────────────────────────────────────────────────
     if (c.startsWith("find.")) {
         piggy_handleFind(srv, c, payload, client, id, tabId);
         return;
     }
 
-    // ── Provide API (provide.*) ───────────────────────────────────────────────
+    // ── Provide (provide.*) ───────────────────────────────────────────────────
     if (c.startsWith("provide.")) {
         piggy_handleProvide(srv, c, payload, client, id, tabId);
         return;
@@ -101,15 +109,37 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         return;
     }
 
-    // ── Human behavior (human.*) ──────────────────────────────────────────────
+    // ── Human (human.*) ───────────────────────────────────────────────────────
     if (c.startsWith("human.")) {
         piggy_handleHuman(srv, c, payload, client, id, tabId);
         return;
     }
 
-    // ── Extended wait + fetch (wait.function, fetch.textAll, fetch.attr, etc) ─
-    // NOTE: must come BEFORE navigation, since wait.selector is overridden here
-    // with state support. PiggyNavigation's wait.selector handles the fallback.
+    // ── QR (qr.*) ─────────────────────────────────────────────────────────────
+    if (c.startsWith("qr.")) {
+        piggy_handleQR(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Storage (storage.*) ───────────────────────────────────────────────────
+    if (c.startsWith("storage.")) {
+        piggy_handleStorage(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Media capture (media.*) ───────────────────────────────────────────────
+    if (c.startsWith("media.")) {
+        piggy_handleMediaCapture(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Cookie inject commands (cookieinject.*) ───────────────────────────────
+    if (c.startsWith("cookieinject.")) {
+        piggy_handleCookieInject(srv, c, payload, client, id, tabId);
+        return;
+    }
+
+    // ── Extended wait + fetch ─────────────────────────────────────────────────
     if (c == "wait.function"   ||
         c == "wait.selector"   ||
         c == "fetch.textAll"   ||
@@ -120,16 +150,16 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
         if (piggy_handleWait(srv, c, payload, client, id, tabId)) return;
     }
 
-    // ── Navigation ───────────────────────────────────────────────────────────
+    // ── Navigation ────────────────────────────────────────────────────────────
     if (piggy_handleNavigation(srv, c, payload, client, id, tabId)) return;
 
-    // ── Media ─────────────────────────────────────────────────────────────────
+    // ── Media (screenshot / pdf / image blocking) ─────────────────────────────
     if (piggy_handleMedia(srv, c, payload, client, id, tabId)) return;
 
     // ── Capture ───────────────────────────────────────────────────────────────
     if (piggy_handleCapture(srv, c, payload, client, id, tabId)) return;
 
-    // ── Human type override (type with clear:true) ────────────────────────────
+    // ── Human type override ───────────────────────────────────────────────────
     if (c == "type" && payload["clear"].toBool(false)) {
         if (piggy_handleHuman(srv, c, payload, client, id, tabId)) return;
     }
@@ -140,7 +170,7 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
     // ── Export / session / cookie / init script / expose ─────────────────────
     if (piggy_handleExport(srv, c, payload, client, id, tabId)) return;
 
-    // ── Wait (remaining — evaluate without timeout, wait.response) ────────────
+    // ── Wait (remaining) ──────────────────────────────────────────────────────
     if (piggy_handleWait(srv, c, payload, client, id, tabId)) return;
 
     // ── Unknown ───────────────────────────────────────────────────────────────

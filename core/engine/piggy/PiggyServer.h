@@ -84,15 +84,22 @@ signals:
     void tabClosed(const QString &tabId);
 
 public slots:
-    void onRequestCaptured(const CapturedRequest &req, const QString &tabId);
-    void onWsFrameCaptured(const WebSocketFrame &frame, const QString &tabId);
-    void onCookieCaptured(const CapturedCookie &cookie, const QString &tabId);
-    void onCookieRemoved(const QString &name, const QString &domain, const QString &tabId);
-    void onStorageCaptured(const QString &origin, const QString &key,
-                           const QString &value, const QString &storageType,
+    void onRequestCaptured(const CapturedRequest &req,
+                            const QString &tabId);
+    void onWsFrameCaptured(const WebSocketFrame &frame,
+                            const QString &tabId);
+    void onCookieCaptured(const CapturedCookie &cookie,
                            const QString &tabId);
-    void onExposedFunctionCalled(const QString &name, const QString &callId,
-                                 const QString &data, const QString &tabId);
+    void onCookieRemoved(const QString &name, const QString &domain,
+                          const QString &tabId);
+    void onStorageCaptured(const QString &origin, const QString &key,
+                            const QString &value,
+                            const QString &storageType,
+                            const QString &tabId);
+    void onExposedFunctionCalled(const QString &name,
+                                  const QString &callId,
+                                  const QString &data,
+                                  const QString &tabId);
 
 private slots:
     void onNewConnection();

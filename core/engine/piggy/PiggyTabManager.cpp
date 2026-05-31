@@ -6,6 +6,10 @@
 #include "Sessionmanager.h"
 #include "PiggyCaptcha.h"
 #include "PiggyDialog.h"
+#include "PiggyQR.h"
+#include "PiggyInnerStorage.h"
+#include "PiggyCookieInject.h"
+#include "PiggyMediaCapture.h"
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
 #include <QWebEngineSettings>
@@ -17,39 +21,45 @@
 #include <QUuid>
 
 // ─── Profile configuration ────────────────────────────────────────────────────
-// Storage always goes into the current working directory — the folder the user
-// ran their script from (e.g. ~/projects/my-scraper/).
 
 void piggy_configureProfile(QWebEngineProfile *profile) {
-    // Root is cwd, not ~/.piggy
-    QString base = SessionManager::workDir() + "/.piggy-data/" + profile->storageName();
+    QString base = SessionManager::workDir() + "/.piggy-data/"
+                 + profile->storageName();
     QDir().mkpath(base + "/storage");
     QDir().mkpath(base + "/cache");
 
     profile->setPersistentStoragePath(base + "/storage");
     profile->setCachePath(base + "/cache");
     profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
-    profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
-
+    profile->setPersistentCookiesPolicy(
+        QWebEngineProfile::ForcePersistentCookies);
     profile->setHttpUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    );
+        "Chrome/124.0.0.0 Safari/537.36");
 
     auto *s = profile->settings();
-    s->setAttribute(QWebEngineSettings::LocalStorageEnabled,             true);
-    s->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
-    s->setAttribute(QWebEngineSettings::AllowRunningInsecureContent,     true);
-    s->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows,        true);
-    s->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard,    true);
-    s->setAttribute(QWebEngineSettings::WebGLEnabled,                    true);
-    s->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled,      true);
-    s->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,           true);
+    s->setAttribute(
+        QWebEngineSettings::LocalStorageEnabled,             true);
+    s->setAttribute(
+        QWebEngineSettings::LocalContentCanAccessRemoteUrls, true);
+    s->setAttribute(
+        QWebEngineSettings::AllowRunningInsecureContent,     true);
+    s->setAttribute(
+        QWebEngineSettings::JavascriptCanOpenWindows,        true);
+    s->setAttribute(
+        QWebEngineSettings::JavascriptCanAccessClipboard,    true);
+    s->setAttribute(
+        QWebEngineSettings::WebGLEnabled,                    true);
+    s->setAttribute(
+        QWebEngineSettings::Accelerated2dCanvasEnabled,      true);
+    s->setAttribute(
+        QWebEngineSettings::ScrollAnimatorEnabled,           true);
 
     static const QString kChromeSpoof = R"JS(
 (function() {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false, configurable: true });
+    Object.defineProperty(navigator, 'webdriver',
+        { get: () => false, configurable: true });
     Object.defineProperty(navigator, 'plugins', {
         get: () => {
             var arr = [
@@ -59,15 +69,18 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
             ];
             arr.item      = i => arr[i];
             arr.refresh   = () => {};
-            arr.namedItem = n => arr.find(p => p.name === n) || null;
+            arr.namedItem = n => arr.find(p => p.name === n)||null;
             return arr;
-        },
-        configurable: true
+        }, configurable: true
     });
-    Object.defineProperty(navigator, 'languages', { get: () => ['en-US','en'], configurable: true });
-    Object.defineProperty(navigator, 'platform',  { get: () => 'Win32',        configurable: true });
+    Object.defineProperty(navigator, 'languages',
+        { get: () => ['en-US','en'], configurable: true });
+    Object.defineProperty(navigator, 'platform',
+        { get: () => 'Win32', configurable: true });
     Object.defineProperty(navigator, 'userAgent', {
-        get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                 + 'AppleWebKit/537.36 (KHTML, like Gecko) '
+                 + 'Chrome/124.0.0.0 Safari/537.36',
         configurable: true
     });
     Object.defineProperty(navigator, 'userAgentData', {
@@ -88,46 +101,45 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
                     model:           '',
                     uaFullVersion:   '124.0.0.0',
                     fullVersionList: [
-                        { brand: 'Chromium',      version: '124.0.0.0' },
-                        { brand: 'Google Chrome', version: '124.0.0.0' },
-                        { brand: 'Not-A.Brand',   version: '99.0.0.0'  }
+                        { brand:'Chromium',      version:'124.0.0.0'},
+                        { brand:'Google Chrome', version:'124.0.0.0'},
+                        { brand:'Not-A.Brand',   version:'99.0.0.0' }
                     ]
                 });
             }
-        }),
-        configurable: true
+        }), configurable: true
     });
     if (!window.chrome) {
         window.chrome = {
             runtime: {
-                onMessage:   { addListener: function(){}, removeListener: function(){} },
-                sendMessage: function(){},
-                connect:     function(){ return {
-                    onMessage:   { addListener: function(){} },
-                    postMessage: function(){},
-                    disconnect:  function(){}
-                }; },
-                onConnect: { addListener: function(){} },
+                onMessage:   { addListener:()=>{}, removeListener:()=>{}},
+                sendMessage: ()=>{},
+                connect: ()=>({
+                    onMessage:   { addListener:()=>{} },
+                    postMessage: ()=>{},
+                    disconnect:  ()=>{}
+                }),
+                onConnect: { addListener:()=>{} },
                 id: undefined
             },
-            loadTimes: function(){ return {}; },
-            csi:       function(){ return {}; }
+            loadTimes: ()=>({}),
+            csi:       ()=>({})
         };
     }
     if (!navigator.permissions) {
         Object.defineProperty(navigator, 'permissions', {
-            get: () => ({
-                query: function(p){ return Promise.resolve({ state:'granted', onchange:null }); }
-            }),
-            configurable: true
+            get: ()=>({
+                query: p=>Promise.resolve({state:'granted',onchange:null})
+            }), configurable: true
         });
     }
     if (navigator.storage) {
-        navigator.storage.persist   = function(){ return Promise.resolve(true); };
-        navigator.storage.persisted = function(){ return Promise.resolve(true); };
+        navigator.storage.persist   = ()=>Promise.resolve(true);
+        navigator.storage.persisted = ()=>Promise.resolve(true);
     }
     if (window.Notification) {
-        Object.defineProperty(Notification, 'permission', { get: () => 'default', configurable: true });
+        Object.defineProperty(Notification, 'permission',
+            { get: ()=>'default', configurable: true });
     }
 })();
 )JS";
@@ -147,7 +159,8 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId) {
     if (!tabId.isEmpty() && tabId != "default") {
         auto it = srv->tabs().find(tabId);
         if (it != srv->tabs().end()) return it.value().page;
-        qWarning() << "[PiggyServer] Unknown tabId:" << tabId << "— falling back to default";
+        qWarning() << "[PiggyServer] Unknown tabId:" << tabId
+                   << "— falling back to default";
     }
     if (srv->piggy())       return srv->piggy()->getPage();
     if (srv->headfulPage()) return srv->headfulPage();
@@ -175,7 +188,7 @@ QString piggy_createTab(PiggyServer *srv) {
 
     auto *p = new QWebEnginePage(profile, srv);
 
-    // Fingerprint spoof
+    // ── Fingerprint spoof ─────────────────────────────────────────────────────
     auto &spoofer = FingerprintSpoofer::instance();
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint_" + id);
@@ -185,7 +198,7 @@ QString piggy_createTab(PiggyServer *srv) {
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
-    // Capture script
+    // ── Capture script ────────────────────────────────────────────────────────
     QWebEngineScript capScript;
     capScript.setName("nothing_capture_" + id);
     capScript.setSourceCode(NetworkCapture::captureScript());
@@ -201,11 +214,17 @@ QString piggy_createTab(PiggyServer *srv) {
     capture->attachToPage(p, profile);
 
     QObject::connect(capture, &NetworkCapture::requestCaptured, srv,
-        [srv, id](const CapturedRequest &req) { srv->onRequestCaptured(req, id); });
+        [srv, id](const CapturedRequest &req) {
+            srv->onRequestCaptured(req, id);
+        });
     QObject::connect(capture, &NetworkCapture::wsFrameCaptured, srv,
-        [srv, id](const WebSocketFrame &frame) { srv->onWsFrameCaptured(frame, id); });
+        [srv, id](const WebSocketFrame &frame) {
+            srv->onWsFrameCaptured(frame, id);
+        });
     QObject::connect(capture, &NetworkCapture::cookieCaptured, srv,
-        [srv, id](const CapturedCookie &cookie) { srv->onCookieCaptured(cookie, id); });
+        [srv, id](const CapturedCookie &cookie) {
+            srv->onCookieCaptured(cookie, id);
+        });
     QObject::connect(capture, &NetworkCapture::cookieRemoved, srv,
         [srv, id](const QString &name, const QString &domain) {
             srv->onCookieRemoved(name, domain, id);
@@ -215,6 +234,8 @@ QString piggy_createTab(PiggyServer *srv) {
                   const QString &value, const QString &type) {
             srv->onStorageCaptured(origin, key, value, type, id);
         });
+
+    // ── URL change event → Node ───────────────────────────────────────────────
     QObject::connect(p, &QWebEnginePage::urlChanged, srv,
         [srv, id](const QUrl &url) {
             QJsonObject event;
@@ -222,16 +243,29 @@ QString piggy_createTab(PiggyServer *srv) {
             event["event"] = "navigate";
             event["tabId"] = id;
             event["url"]   = url.toString();
-            QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
+            QByteArray msg =
+                QJsonDocument(event).toJson(QJsonDocument::Compact)
+                + "\n";
             for (auto *client : srv->clients()) {
-                if (client && client->state() == QLocalSocket::ConnectedState)
+                if (client &&
+                    client->state() == QLocalSocket::ConnectedState)
                     client->write(msg);
             }
         });
 
-    // ── NEW: watch for captcha + dialogs ─────────────────────────────────────
-    if (piggy_captchaDetector()) piggy_captchaDetector()->watchTab(id, p);
-    if (piggy_dialogHandler())   piggy_dialogHandler()->watchTab(id, p);
+    // ── Wire all plugins ──────────────────────────────────────────────────────
+    if (piggy_captchaDetector())
+        piggy_captchaDetector()->watchTab(id, p);
+    if (piggy_dialogHandler())
+        piggy_dialogHandler()->watchTab(id, p);
+    if (piggy_qrDetector())
+        piggy_qrDetector()->watchTab(id, p);
+    if (piggy_innerStorage())
+        piggy_innerStorage()->watchTab(id, p);
+    if (piggy_cookieInject())
+        piggy_cookieInject()->watchTab(id, p);
+    if (piggy_mediaCapture())
+        piggy_mediaCapture()->watchTab(id, p);
 
     TabContext ctx;
     ctx.page        = p;
@@ -250,9 +284,19 @@ void piggy_closeTab(PiggyServer *srv, const QString &tabId) {
     if (!srv->tabs().contains(tabId)) return;
     TabContext &ctx = srv->tabs()[tabId];
 
-    // ── NEW: stop watching ────────────────────────────────────────────────────
-    if (piggy_captchaDetector()) piggy_captchaDetector()->unwatchTab(tabId);
-    if (piggy_dialogHandler())   piggy_dialogHandler()->unwatchTab(tabId);
+    // ── Unwatch all plugins ───────────────────────────────────────────────────
+    if (piggy_captchaDetector())
+        piggy_captchaDetector()->unwatchTab(tabId);
+    if (piggy_dialogHandler())
+        piggy_dialogHandler()->unwatchTab(tabId);
+    if (piggy_qrDetector())
+        piggy_qrDetector()->unwatchTab(tabId);
+    if (piggy_innerStorage())
+        piggy_innerStorage()->unwatchTab(tabId);
+    if (piggy_cookieInject())
+        piggy_cookieInject()->unwatchTab(tabId);
+    if (piggy_mediaCapture())
+        piggy_mediaCapture()->unwatchTab(tabId);
 
     ctx.page->deleteLater();
     ctx.interceptor->deleteLater();
