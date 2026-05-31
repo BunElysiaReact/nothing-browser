@@ -276,7 +276,7 @@ bool piggy_handleCookieInject(PiggyServer *srv, const QString &c,
         ci->reloadAndInject(tabId);
         srv->respond(client, id, true,
             QString("injected %1 cookies into tab %2")
-                .arg(ci->lastInjectedCount(), tabId));
+                .arg(ci->lastInjectedCount()).arg(tabId));
         return true;
     }
 

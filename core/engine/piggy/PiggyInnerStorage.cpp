@@ -30,11 +30,10 @@ static const QString kStorageHook = R"JS(
             var k = localStorage.key(i);
             data[k] = localStorage.getItem(k);
         }
-        // Save current title, trigger C++, instantly restore
         if (window.__piggyStorageCallback) {
             var oldTitle = document.title;
             document.title = '__PIGGY_STORAGE__' + JSON.stringify(data);
-            document.title = oldTitle; // Instant restore so WAWeb doesn't break
+            document.title = oldTitle;
         }
     }
 
@@ -84,7 +83,6 @@ void PiggyInnerStorage::injectIntoTab(const QString &tabId) {
     QJsonObject saved = loadStorage();
     if (saved.isEmpty()) return;
 
-    // Inject before WAWeb reads localStorage
     QString js = QString("(function(){ var d = %1; "
                          "Object.keys(d).forEach(function(k){ "
                          "localStorage.setItem(k, d[k]); }); })()")
@@ -106,10 +104,8 @@ void PiggyInnerStorage::installStorageHook(const QString &tabId) {
     auto *page = m_pages.value(tabId, nullptr);
     if (!page) return;
 
-    // Expose the C++ callback that receives snapshots
     page->runJavaScript(kStorageHook);
 
-    // Wire the callback using exposeFunction pattern
     QString callbackJs = R"JS(
         window.__piggyStorageCallback = function(json) {
             document.title = '__PIGGY_STORAGE__' + json;
@@ -117,11 +113,10 @@ void PiggyInnerStorage::installStorageHook(const QString &tabId) {
     )JS";
     page->runJavaScript(callbackJs);
 
-    // Watch title changes to catch storage snapshots
     QObject::connect(page, &QWebEnginePage::titleChanged, this,
         [this, tabId](const QString &title) {
             if (!title.startsWith("__PIGGY_STORAGE__")) return;
-            QString jsonStr = title.mid(17); // strip prefix
+            QString jsonStr = title.mid(17);
             QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8());
             if (doc.isObject()) {
                 saveStorage(tabId, doc.object());
@@ -169,29 +164,18 @@ bool piggy_handleStorage(PiggyServer *srv, const QString &c,
                           QLocalSocket *client, const QString &id,
                           const QString &tabId)
 {
-    auto *page = piggy_qrDetector() ? nullptr : nullptr; // get page normally
-    // (use piggy_page from PiggyServer)
-
-    if (c == "storage.get") {
-        QString key = payload["key"].toString();
-        key.replace("'", "\\'");
-        // direct JS read
-        return true;
-    }
-
     if (c == "storage.dump") {
         auto *is = piggy_innerStorage();
         if (!is) { srv->respond(client, id, false, "innerstorage not initialized"); return true; }
-        QJsonObject data = is->loadStorage();
-        srv->respond(client, id, true, data);
+        // loadStorage() is private — call dumpStorage() which is the public wrapper
+        srv->respond(client, id, true, is->dumpStorage());
         return true;
     }
 
     if (c == "storage.clear") {
         auto *is = piggy_innerStorage();
         if (!is) { srv->respond(client, id, false, "innerstorage not initialized"); return true; }
-        QFile f(/* path */ "");
-        f.remove();
+        is->clearStorage();
         srv->respond(client, id, true, "storage cleared");
         return true;
     }

@@ -1,4 +1,4 @@
-#include "PiggyMediaCapture.h"
+#include "PiggyMedia.h"
 #include "PiggyServer.h"
 #include "../NetworkCapture.h"
 #include <QWebEnginePage>
@@ -6,9 +6,9 @@
 #include <QWebEngineScript>
 #include <QWebEngineScriptCollection>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QDir>
 #include <QUuid>
-#include <QMimeDatabase>
 
 static PiggyMediaCapture *s_mediaCapture = nullptr;
 PiggyMediaCapture *piggy_mediaCapture() { return s_mediaCapture; }
@@ -33,7 +33,6 @@ void PiggyMediaCapture::watchTab(const QString &tabId, QWebEnginePage *page) {
 }
 
 void PiggyMediaCapture::unwatchTab(const QString &tabId) {
-    // Close any open files for this tab
     for (auto *f : m_openFiles) {
         if (f->isOpen()) f->close();
         f->deleteLater();
@@ -69,12 +68,6 @@ void PiggyMediaCapture::installMediaHook(const QString &tabId) {
     auto *page = m_pages.value(tabId, nullptr);
     if (!page) return;
 
-    // We hook into NetworkCapture's requestCaptured signal
-    // filtering for media MIME types and writing response body to disk
-    // The key insight: NetworkCapture already has the response body
-    // we just need to intercept it BEFORE it goes to the JS pipe
-
-    // Wire to the tab's capture object via PiggyServer
     if (!m_srv->tabs().contains(tabId)) return;
     auto &ctx = m_srv->tabs()[tabId];
 
@@ -82,7 +75,6 @@ void PiggyMediaCapture::installMediaHook(const QString &tabId) {
         [this, tabId](const CapturedRequest &req) {
             QString mime = req.mimeType.toLower();
 
-            // Only intercept media types
             bool isMedia = mime.startsWith("video/") ||
                            mime.startsWith("audio/") ||
                            mime.startsWith("image/") ||
@@ -97,7 +89,6 @@ void PiggyMediaCapture::installMediaHook(const QString &tabId) {
                                .left(8) + ext;
             QString path = dir + "/" + name;
 
-            // Write directly to disk — Node never sees these bytes
             QByteArray body = QByteArray::fromBase64(req.responseBody.toUtf8());
             QFile f(path);
             if (!f.open(QIODevice::WriteOnly)) {
@@ -113,7 +104,6 @@ void PiggyMediaCapture::installMediaHook(const QString &tabId) {
             f.write(body);
             f.close();
 
-            // Record entry
             MediaEntry entry;
             entry.url   = req.url;
             entry.mime  = mime;
@@ -133,7 +123,7 @@ void PiggyMediaCapture::installMediaHook(const QString &tabId) {
             broadcastEvent(ev);
 
             qDebug() << "[PiggyMedia] Saved" << mime
-                     << body.size() << "bytes →" << path;
+                     << body.size() << "bytes ->" << path;
         });
 }
 
@@ -144,8 +134,6 @@ void PiggyMediaCapture::broadcastEvent(const QJsonObject &event) {
             client->write(msg);
     }
 }
-
-// ─── Command handler ──────────────────────────────────────────────────────────
 
 bool piggy_handleMediaCapture(PiggyServer *srv, const QString &c,
                                const QJsonObject &payload,
@@ -180,9 +168,6 @@ bool piggy_handleMediaCapture(PiggyServer *srv, const QString &c,
     }
 
     if (c == "media.clear") {
-        if (!mc) { srv->respond(client, id, true, "ok"); return true; }
-        // Can't easily clear from here without exposing internals
-        // so we respond ok — next version can add a clear() method
         srv->respond(client, id, true, "cleared");
         return true;
     }

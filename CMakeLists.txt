@@ -43,6 +43,10 @@ set(PIGGY_SOURCES
     core/engine/piggy/PiggyIframe.cpp          # iframe handling
     core/engine/piggy/PiggyProvide.cpp         # data provision
     core/engine/piggy/PiggyWait.cpp            # wait utilities
+    core/engine/piggy/PiggyQR.cpp              # QR code detection
+    core/engine/piggy/PiggyInnerStorage.cpp    # localStorage persistence
+    core/engine/piggy/PiggyCookieInject.cpp    # cookie injection before page load
+    core/engine/piggy/PiggyMediaCapture.cpp    # media stream interception
 )
 
 # ── Other shared sources ──────────────────────────────────────────────────────
