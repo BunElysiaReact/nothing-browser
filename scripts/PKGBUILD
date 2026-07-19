@@ -1,0 +1,40 @@
+# Maintainer: BunElysiaReact <peaseernest8@gmail.com>
+pkgname=nothing-browser
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Does nothing... except everything that matters. A meta scrapper browser."
+arch=('x86_64')
+url="https://github.com/BunElysiaReact/nothing-browser"
+license=('MIT')
+depends=('qt6-webengine' 'qt6-base')
+makedepends=('cmake' 'git' 'base-devel')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')  # replace with real sha256 after first release tag
+
+build() {
+    cd "$pkgname-$pkgver"
+    mkdir -p build
+    cd build
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr
+    make -j"$(nproc)"
+}
+
+package() {
+    cd "$pkgname-$pkgver/build"
+    install -Dm755 nothing-browser "$pkgdir/usr/bin/nothing-browser"
+    install -Dm644 "../assets/icons/logo.svg" \
+        "$pkgdir/usr/share/nothing-browser/logo.svg"
+    install -Dm644 - "$pkgdir/usr/share/applications/nothing-browser.desktop" << EOF
+[Desktop Entry]
+Name=Nothing Browser
+Comment=Does nothing... except everything that matters
+Exec=/usr/bin/nothing-browser
+Icon=/usr/share/nothing-browser/logo.svg
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;Development;
+Keywords=browser;scraper;devtools;network;
+EOF
+}
