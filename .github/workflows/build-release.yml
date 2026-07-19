@@ -228,6 +228,14 @@ jobs:
           cache: true
           dir: "C:/Qt"
 
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Build NewPipe Bridge JAR
         shell: cmd
         run: |
@@ -255,12 +263,11 @@ jobs:
           cmake .. ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_PREFIX_PATH="%QT_CMAKE_DIR%" ^
-            -G "Visual Studio 17 2022" ^
-            -A x64
+            -G "Ninja"
 
       - name: Build
         shell: cmd
-        run: cmake --build build-win --config Release --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
+        run: cmake --build build-win --parallel --target nothing-browser nothing-browser-headless nothing-browser-headful
 
       - name: Package nothing-browser
         shell: powershell
@@ -269,7 +276,7 @@ jobs:
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
           $outDir = "dist\nothing-browser-win64"
           New-Item -ItemType Directory -Force $outDir
-          Copy-Item "build-win\Release\nothing-browser.exe" "$outDir\"
+          Copy-Item "build-win\nothing-browser.exe" "$outDir\"
           Copy-Item "newpipe-bridge\build\libs\newpipe-bridge-1.0.0.jar" "$outDir\newpipe-bridge.jar"
           $javaHome = "$env:JAVA_HOME"
           Copy-Item -Recurse "$javaHome" "$outDir\jre"
@@ -289,7 +296,7 @@ jobs:
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
           $outDir = "dist\nothing-browser-headless-win64"
           New-Item -ItemType Directory -Force $outDir
-          Copy-Item "build-win\Release\nothing-browser-headless.exe" "$outDir\"
+          Copy-Item "build-win\nothing-browser-headless.exe" "$outDir\"
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headless.exe"
@@ -306,7 +313,7 @@ jobs:
           if ([string]::IsNullOrEmpty($version) -or $version -eq "main") { $version = "dev" }
           $outDir = "dist\nothing-browser-headful-win64"
           New-Item -ItemType Directory -Force $outDir
-          Copy-Item "build-win\Release\nothing-browser-headful.exe" "$outDir\"
+          Copy-Item "build-win\nothing-browser-headful.exe" "$outDir\"
           $wdqt = Get-ChildItem "C:\Qt" -Recurse -Filter "windeployqt.exe" |
                   Select-Object -First 1 -ExpandProperty FullName
           & $wdqt --release --no-compiler-runtime "$outDir\nothing-browser-headful.exe"
