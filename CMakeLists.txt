@@ -5,7 +5,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS
-    Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL)
+    Core Gui Widgets WebEngineWidgets WebEngineCore Network OpenGL WebSockets)
 find_package(OpenSSL REQUIRED)
 
 # ── Headers that contain Q_OBJECT ────────────────────────────────────────────
@@ -22,29 +22,28 @@ set(MOC_HEADERS
     core/engine/UpdateChecker.h
     core/engine/NetworkCapture.h
     core/engine/PluginManager.h
+    core/engine/CdpProbe.h                    # <-- fixed path
 )
 
 # ── PiggyServer — split into logical chunks ───────────────────────────────────
 set(PIGGY_SOURCES
-    core/engine/piggy/PiggyServer.cpp          # constructor, start/stop, connections
-    core/engine/piggy/PiggyCommandRouter.cpp   # handleCommand dispatch
-    core/engine/piggy/PiggyTabManager.cpp      # createTab, closeTab, page(), configureProfile
-    core/engine/piggy/PiggyNavigation.cpp      # navigate, reload, back/forward, wait, page.*
-    core/engine/piggy/PiggyInteractions.cpp    # click, type, hover, keyboard, mouse, evaluate
-    core/engine/piggy/PiggyCapture.cpp         # capture start/stop + all capture commands
-    core/engine/piggy/PiggyExport.cpp          # session, cookies, intercept, expose, fetch.*
-    core/engine/piggy/PiggyFind.cpp            # find.* — boolean existence/state checks
-    core/engine/piggy/PiggyProvide.cpp         # provide.* — actual data extraction
-    core/engine/piggy/PiggyMedia.cpp           # screenshot, pdf, image blocking
-    core/engine/piggy/PiggyProxy.cpp           # all proxy.* commands + event wiring
+    core/engine/piggy/PiggyServer.cpp
+    core/engine/piggy/PiggyCommandRouter.cpp
+    core/engine/piggy/PiggyTabManager.cpp
+    core/engine/piggy/PiggyNavigation.cpp
+    core/engine/piggy/PiggyInteractions.cpp
+    core/engine/piggy/PiggyCapture.cpp
+    core/engine/piggy/PiggyExport.cpp
+    core/engine/piggy/PiggyFind.cpp
+    core/engine/piggy/PiggyProvide.cpp
+    core/engine/piggy/PiggyMedia.cpp
+    core/engine/piggy/PiggyProxy.cpp
     core/engine/piggy/PiggyHttp.cpp
     core/engine/piggy/PiggyDialog.cpp
     core/engine/piggy/PiggyPage.cpp
-    
 )
 
 # ── Other shared sources ──────────────────────────────────────────────────────
-
 set(SHARED_SOURCES
     core/engine/FingerprintSpoofer.cpp
     core/engine/NetworkCapture.cpp
@@ -54,11 +53,10 @@ set(SHARED_SOURCES
     core/engine/ProxyManager.cpp
     core/tabs/PiggyTab.cpp
     ${PIGGY_SOURCES}
-    core/engine/piggy/Sessionmanager.cpp   # ← new
+    core/engine/piggy/Sessionmanager.cpp
 )
 
-
-# ── DevToolsPanel — split into logical chunks ─────────────────────────────────
+# ── DevToolsPanel ─────────────────────────────────────────────────────────────
 set(DEVTOOLS_SOURCES
     core/tabs/DevToolsPanel_WelcomeScreen.cpp
     core/tabs/DevToolsPanel_Helpers.cpp
@@ -83,6 +81,7 @@ add_executable(nothing-browser
     ${DEVTOOLS_SOURCES}
     ${SHARED_SOURCES}
     ${MOC_HEADERS}
+    core/engine/CdpProbe.cpp                 # <-- fixed path
 )
 
 # ── Headless binary ───────────────────────────────────────────────────────────
@@ -111,6 +110,7 @@ set(COMMON_LIBS
     Qt6::WebEngineCore
     Qt6::Network
     Qt6::OpenGL
+    Qt6::WebSockets
     OpenSSL::SSL
     OpenSSL::Crypto
 )

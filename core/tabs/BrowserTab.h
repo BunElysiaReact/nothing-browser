@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include "../engine/NetworkCapture.h"
 #include "../engine/PluginManager.h"
+#include "../engine/CdpProbe.h"
 
 class Interceptor;
 
@@ -23,6 +24,7 @@ signals:
     void requestCaptured(const QString &method,
                          const QString &url,
                          const QString &headers);
+    void wsFrameCaptured(const WebSocketFrame &frame);   // for CDP probe
 
 private slots:
     void navigate();
@@ -48,6 +50,7 @@ private:
     QLabel         *m_statusLabel;
     Interceptor    *m_interceptor;
     NetworkCapture *m_capture;
+    CdpProbe       *m_cdpProbe;
     bool            m_onHomePage = true;
 
     // Shortcuts storage

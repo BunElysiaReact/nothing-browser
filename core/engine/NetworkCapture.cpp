@@ -186,6 +186,7 @@ QString NetworkCapture::captureScript() {
 if (window.__NOTHING_CAPTURE_INIT__) return;
 window.__NOTHING_CAPTURE_INIT__ = true;
 window.__NOTHING_QUEUE__ = [];
+console.log('[Nothing] capture script loaded in', location.href);
 
 var push = function(obj) { window.__NOTHING_QUEUE__.push(obj); };
 var uid  = function() { return Math.random().toString(36).slice(2,10)+Date.now().toString(36); };
@@ -336,6 +337,64 @@ window.WebSocket.CONNECTING = _WS.CONNECTING;
 window.WebSocket.OPEN       = _WS.OPEN;
 window.WebSocket.CLOSING    = _WS.CLOSING;
 window.WebSocket.CLOSED     = _WS.CLOSED;
+
+// ── Worker interception (catches WS created inside Workers) ──────────────────
+var _Worker = window.Worker;
+window.Worker = function(url, opts) {
+    var absUrl;
+    try { absUrl = new URL(url, location.href).href; } catch(e) { absUrl = String(url); }
+
+    var src = null;
+    try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', absUrl, false);   // sync, same-origin only
+        xhr.send();
+        src = xhr.responseText;
+    } catch(e) {
+        push({ type:'worker_created', url: absUrl, note: 'fetch failed (cross-origin?): ' + e.message });
+    }
+
+    if (src === null) {
+        return new _Worker(url, opts);   // fall back, unpatched
+    }
+
+    push({ type:'worker_created', url: absUrl });
+
+    var patch = "(" + function() {
+        var _WS = self.WebSocket;
+        if (!_WS) return;
+        self.WebSocket = function(u, p) {
+            var ws = p ? new _WS(u, p) : new _WS(u);
+            ws.addEventListener('message', function(e) {
+                self.postMessage({ __nothing_ws__: true, kind:'recv', url: u, data: e.data });
+            });
+            var _send = ws.send.bind(ws);
+            ws.send = function(d) {
+                self.postMessage({ __nothing_ws__: true, kind:'send', url: u, data: d });
+                return _send(d);
+            };
+            return ws;
+        };
+        self.WebSocket.prototype = _WS.prototype;
+    }.toString() + ")();\n";
+
+    var blob = new Blob([patch + src], { type: 'application/javascript' });
+    var w = new _Worker(URL.createObjectURL(blob), opts);
+
+    w.addEventListener('message', function(e) {
+        var d = e.data;
+        if (!d || !d.__nothing_ws__) return;
+        push({
+            type: d.kind === 'send' ? 'ws_send' : 'ws_recv',
+            id: absUrl, url: d.url,
+            data: typeof d.data === 'string' ? d.data.slice(0,8000) : JSON.stringify(d.data).slice(0,8000),
+            binary: false
+        });
+    });
+
+    return w;
+};
+window.Worker.prototype = _Worker.prototype;
 
 // ── localStorage / sessionStorage ─────────────────────────────────────────────
 function wrapStorage(store, label) {

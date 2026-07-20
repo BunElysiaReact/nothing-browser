@@ -2,6 +2,7 @@
 #include "../engine/Interceptor.h"
 #include "../engine/FingerprintSpoofer.h"
 #include "../engine/NetworkCapture.h"
+#include "../engine/CdpProbe.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWebEngineSettings>
@@ -19,9 +20,11 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFileInfo>
+#include <QDebug>
+#include <QTimer>
 
 // ============================================================================
-// Custom page to intercept nothing:// URLs before they reach the OS
+// Custom page that intercepts nothing:// URLs AND shows console.log
 // ============================================================================
 class NothingWebPage : public QWebEnginePage {
     Q_OBJECT
@@ -32,10 +35,18 @@ signals:
     void nothingAction(const QUrl &url);
 
 protected:
+    void javaScriptConsoleMessage(JavaScriptConsoleMessageLevel level,
+                                   const QString &message, int lineNumber,
+                                   const QString &sourceID) override {
+        Q_UNUSED(level)
+        qDebug().noquote() << "[JS]" << message
+                           << "(" << sourceID << ":" << lineNumber << ")";
+    }
+
     bool acceptNavigationRequest(const QUrl &url, NavigationType type, bool isMainFrame) override {
         if (url.scheme() == "nothing") {
             emit nothingAction(url);
-            return false;   // reject navigation – Qt will not forward to OS
+            return false;
         }
         return QWebEnginePage::acceptNavigationRequest(url, type, isMainFrame);
     }
@@ -185,19 +196,44 @@ void BrowserTab::setupWebEngine() {
     profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
     profile->setHttpUserAgent(spoofer.identity().userAgent);
 
+    // ── VISIBILITY SPOOF: prevent tab-switch pausing ──────────────────────
+    QWebEngineScript visScript;
+    visScript.setName("nothing_visibility_spoof");
+    visScript.setSourceCode(R"JS(
+(function() {
+    'use strict';
+    if (window.__NOTHING_VIS_SPOOF__) return;
+    window.__NOTHING_VIS_SPOOF__ = true;
+    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    document.dispatchEvent = new Proxy(document.dispatchEvent, {
+        apply(target, thisArg, args) {
+            if (args[0] && args[0].type === 'visibilitychange') return true;
+            return target.apply(thisArg, args);
+        }
+    });
+})();
+)JS");
+    visScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
+    visScript.setWorldId(QWebEngineScript::MainWorld);
+    visScript.setRunsOnSubFrames(true);
+    profile->scripts()->insert(visScript);
+
+    // ── FINGERPRINT SPOOF ──────────────────────────────────────────────────
     QWebEngineScript spoofScript;
     spoofScript.setName("nothing_fingerprint");
     QString _s = spoofer.injectionScript();
     spoofScript.setSourceCode(_s);
-    spoofScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    spoofScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     spoofScript.setWorldId(QWebEngineScript::MainWorld);
     spoofScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(spoofScript);
 
+    // ── NETWORK CAPTURE (HTTP/XHR only – WS now handled by CDP) ──────────
     QWebEngineScript capScript;
     capScript.setName("nothing_capture");
     capScript.setSourceCode(NetworkCapture::captureScript());
-    capScript.setInjectionPoint(QWebEngineScript::DocumentReady);
+    capScript.setInjectionPoint(QWebEngineScript::DocumentCreation);
     capScript.setWorldId(QWebEngineScript::MainWorld);
     capScript.setRunsOnSubFrames(true);
     profile->scripts()->insert(capScript);
@@ -261,19 +297,35 @@ void BrowserTab::setupWebEngine() {
         req.openIn(m_view->page());
     });
 
-    // Simple loadFinished handling (no urlChanged needed)
+    // loadFinished: error listener + iframe dump (debug)
     connect(page, &QWebEnginePage::loadFinished, this, [this](bool ok) {
         if (!ok) return;
         m_view->page()->runJavaScript(
             "window.addEventListener('error', e => console.log('FP ERROR:', e.message));"
         );
-        m_view->page()->runJavaScript(NetworkCapture::captureScript());
+
+        // TEMP DEBUG: dump all iframe URLs to terminal
+        m_view->page()->runJavaScript(
+            "Array.from(document.querySelectorAll('iframe')).map(f => f.src).join('\\n')",
+            [](const QVariant &r){ qDebug() << "[Nothing] iframes:\n" << r.toString(); }
+        );
     });
 
     m_view->setPage(page);
 
     m_capture = new NetworkCapture(this);
     m_capture->attachToPage(page, profile);
+
+    // ── CDP PROBE – captures WebSocket frames via Chrome DevTools Protocol ──
+    m_cdpProbe = new CdpProbe(this);
+    connect(m_cdpProbe, &CdpProbe::wsFrameCaptured,
+            this, [this](const WebSocketFrame &frame) {
+                emit wsFrameCaptured(frame);
+            });
+    // Start after a short delay to let the engine spin up
+    QTimer::singleShot(2000, [this]() {
+        if (m_cdpProbe) m_cdpProbe->start();
+    });
 
     applySettings();
     PluginManager::instance().injectAll(profile);
