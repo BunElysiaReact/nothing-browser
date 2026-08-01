@@ -54,7 +54,7 @@ static QString wrapJs(const QString &body) {
 // responds accordingly. This is the one place that talks to
 // PiggyServer::respond() for the whole file.
 static void runJsAndRespond(QWebEnginePage *p, PiggyServer *srv,
-                             QLocalSocket *client, const QString &id,
+                             QWebSocket *client, const QString &id,
                              const QString &body) {
     p->runJavaScript(wrapJs(body), [srv, client, id](const QVariant &r) {
         QJsonDocument doc = QJsonDocument::fromJson(r.toString().toUtf8());
@@ -73,7 +73,7 @@ static void runJsAndRespond(QWebEnginePage *p, PiggyServer *srv,
 
 bool piggy_handleProvide(PiggyServer *srv, const QString &c,
                           const QJsonObject &payload,
-                          QLocalSocket *client, const QString &id,
+                          QWebSocket *client, const QString &id,
                           const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
 

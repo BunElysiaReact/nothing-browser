@@ -7,7 +7,7 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 
 bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
                               const QJsonObject &payload,
-                              QLocalSocket *client, const QString &id,
+                              QWebSocket *client, const QString &id,
                               const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
 

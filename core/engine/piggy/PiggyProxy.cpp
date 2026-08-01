@@ -4,19 +4,17 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QLocalSocket>
+#include <QWebSocket>
 #include <QFile>
 #include <QTextStream>
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Broadcast an event JSON to all connected clients
+// Broadcast an event JSON to all connected clients — proxy state is
+// process-wide, so every connected script should hear about it, not just
+// whoever's tab triggered it.
 static void broadcastEvent(PiggyServer *srv, const QJsonObject &event) {
-    QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
-    for (auto *client : srv->clients()) {
-        if (client && client->state() == QLocalSocket::ConnectedState)
-            client->write(msg);
-    }
+    srv->broadcast(event);
 }
 
 // Convert a ProxyEntry to a JSON summary object
@@ -128,7 +126,7 @@ void piggy_wireProxyEvents(PiggyServer *srv) {
 
 bool piggy_handleProxy(PiggyServer *srv, const QString &c,
                         const QJsonObject &payload,
-                        QLocalSocket *client, const QString &id) {
+                        QWebSocket *client, const QString &id) {
     auto &pm = ProxyManager::instance();
 
     if (!c.startsWith("proxy.")) return false;

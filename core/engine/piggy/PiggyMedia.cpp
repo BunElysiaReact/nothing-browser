@@ -9,7 +9,7 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 
 // ─── Screenshot ───────────────────────────────────────────────────────────────
 
-void piggy_doScreenshot(PiggyServer *srv, QLocalSocket *client,
+void piggy_doScreenshot(PiggyServer *srv, QWebSocket *client,
                          const QString &id, const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
     const QString js = QStringLiteral(
@@ -37,7 +37,7 @@ void piggy_doScreenshot(PiggyServer *srv, QLocalSocket *client,
 
 // ─── PDF ─────────────────────────────────────────────────────────────────────
 
-void piggy_doPdf(PiggyServer *srv, QLocalSocket *client,
+void piggy_doPdf(PiggyServer *srv, QWebSocket *client,
                   const QString &id, const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
     QPageLayout layout(QPageSize(QPageSize::A4),
@@ -66,7 +66,7 @@ void piggy_setImageBlocking(PiggyServer *srv, const QString &tabId, bool block) 
 
 bool piggy_handleMedia(PiggyServer *srv, const QString &c,
                         const QJsonObject & /*payload*/,
-                        QLocalSocket *client, const QString &id,
+                        QWebSocket *client, const QString &id,
                         const QString &tabId) {
     if (c == "screenshot") {
         piggy_doScreenshot(srv, client, id, tabId);

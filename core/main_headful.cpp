@@ -238,13 +238,12 @@ int main(int argc, char *argv[]) {
 )HTML");
 
     auto *server = new PiggyServer(defaultPage, &app);
-    server->start();
+    server->start(); // no apiKey — local headful mode is open on 127.0.0.1:2005
 
     HeadfulWindow window(server, defaultPage);
     window.show();
 
-    qDebug() << "[HeadfulPiggy] Window open, socket: piggy";
-    qDebug() << "[Piggy] Socket ready:" << PiggyServer::SOCKET_NAME;
+    qDebug() << "[HeadfulPiggy] Window open — ws://127.0.0.1:" << PiggyServer::PORT;
 
     return app.exec();
 }

@@ -34,7 +34,11 @@ static std::pair<QString, QString> loadExistingKey() {
     return {obj["name"].toString(), obj["key"].toString()};
 }
 
-static std::tuple<QString, QString, QString> firstRunSetup() {
+// Every script talks to the exact same ws://host:2005 endpoint no matter
+// what — the only thing that varies is whether a key is required. So setup
+// now just asks "open or key-protected?" instead of the old "socket/http"
+// mode split, which no longer exists as a real distinction.
+static std::pair<QString, QString> firstRunSetup() {
     QTextStream in(stdin);
     QTextStream out(stdout);
 
@@ -47,19 +51,16 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "  ╚═╝     ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   \n";
     out << "  Headless Browser Daemon\n\n";
 
-    out << "Mode? (socket/http): ";
+    out << "Require a connection key? This only matters if you're exposing\n";
+    out << "this to the network — local scripts on this machine can always\n";
+    out << "connect over 127.0.0.1 either way. (y/N): ";
     out.flush();
-    QString mode = in.readLine().trimmed().toLower();
+    QString wantsKey = in.readLine().trimmed().toLower();
 
-    if (mode != "http" && mode != "socket") {
-        out << "Invalid — defaulting to socket\n";
-        mode = "socket";
-    }
-
-    if (mode == "socket") {
-        out << "\n[Piggy] Starting in socket mode...\n";
+    if (wantsKey != "y" && wantsKey != "yes") {
+        out << "\n[Piggy] Starting open — no key required\n";
         out.flush();
-        return {"socket", "", ""};
+        return {"", ""};
     }
 
     out << "Session name: ";
@@ -89,7 +90,7 @@ static std::tuple<QString, QString, QString> firstRunSetup() {
     out << "  To reset: delete " << path << " and restart.\n\n";
     out.flush();
 
-    return {"http", name, key};
+    return {name, key};
 }
 
 int main(int argc, char *argv[]) {
@@ -109,18 +110,16 @@ int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName("nothing-browser-headless");
 
-    QString mode, name, key;
+    QString name, key;
     auto [ename, ekey] = loadExistingKey();
 
     if (!ekey.isEmpty()) {
-        mode = "http";
         name = ename;
         key  = ekey;
         qInfo() << "[Piggy] Loaded session:" << name;
-        qInfo() << "[Piggy] HTTP mode — port 2005";
     } else {
-        auto [m, n, k] = firstRunSetup();
-        mode = m; name = n; key = k;
+        auto [n, k] = firstRunSetup();
+        name = n; key = k;
     }
 
     auto *profile = new QWebEngineProfile(&app);
@@ -129,14 +128,10 @@ int main(int argc, char *argv[]) {
     auto *defaultPage = new QWebEnginePage(profile, &app);
 
     PiggyServer server(defaultPage, &app);
-    server.start();
+    server.start(key); // key may be empty — that's fine, means "open"
 
-    if (mode == "http") {
-        server.startHttp(key);
-        qInfo() << "[Piggy] HTTP API ready on port 2005";
-        qInfo() << "[Piggy] Session:" << name;
-    } else {
-        qInfo() << "[Piggy] Socket ready:" << PiggyServer::SOCKET_NAME;
+    if (!key.isEmpty()) {
+        qInfo() << "[Piggy] Session:" << name << "— key required to connect";
     }
 
     return app.exec();

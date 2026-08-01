@@ -4,7 +4,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QLocalSocket>
+#include <QWebSocket>
 #include <QEventLoop>
 #include <QTimer>
 
@@ -44,7 +44,7 @@ static bool piggy_waitForDialogPending(PiggyPage *page, int timeoutMs) {
 
 bool piggy_handleDialog(PiggyServer *srv, const QString &c,
                          const QJsonObject &payload,
-                         QLocalSocket *client, const QString &id,
+                         QWebSocket *client, const QString &id,
                          const QString &tabId) {
 
     // ── dialog.accept / dialog.dismiss ────────────────────────────────────────

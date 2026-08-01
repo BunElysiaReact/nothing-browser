@@ -2,54 +2,54 @@
 #include "PiggyProxy.h"
 #include <QCoreApplication>
 #include <QJsonObject>
-#include <QLocalSocket>
+#include <QWebSocket>
 #include <QJsonArray>
 #include <QJsonDocument>
 
 // ─── Forward declarations from split files ────────────────────────────────────
 bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
                              const QJsonObject &payload,
-                             QLocalSocket *client, const QString &id,
+                             QWebSocket *client, const QString &id,
                              const QString &tabId);
 
 bool piggy_handleInteraction(PiggyServer *srv, const QString &c,
                               const QJsonObject &payload,
-                              QLocalSocket *client, const QString &id,
+                              QWebSocket *client, const QString &id,
                               const QString &tabId);
 
 bool piggy_handleDialog(PiggyServer *srv, const QString &c,
                          const QJsonObject &payload,
-                         QLocalSocket *client, const QString &id,
+                         QWebSocket *client, const QString &id,
                          const QString &tabId);
 
 bool piggy_handleMedia(PiggyServer *srv, const QString &c,
                         const QJsonObject &payload,
-                        QLocalSocket *client, const QString &id,
+                        QWebSocket *client, const QString &id,
                         const QString &tabId);
 
 bool piggy_handleCapture(PiggyServer *srv, const QString &c,
                           const QJsonObject &payload,
-                          QLocalSocket *client, const QString &id,
+                          QWebSocket *client, const QString &id,
                           const QString &tabId);
 
 bool piggy_handleExport(PiggyServer *srv, const QString &c,
                          const QJsonObject &payload,
-                         QLocalSocket *client, const QString &id,
+                         QWebSocket *client, const QString &id,
                          const QString &tabId);
 
 bool piggy_handleFind(PiggyServer *srv, const QString &c,
                        const QJsonObject &payload,
-                       QLocalSocket *client, const QString &id,
+                       QWebSocket *client, const QString &id,
                        const QString &tabId);
 
 bool piggy_handleProvide(PiggyServer *srv, const QString &c,
                           const QJsonObject &payload,
-                          QLocalSocket *client, const QString &id,
+                          QWebSocket *client, const QString &id,
                           const QString &tabId);
 
 // ─── Main command router ──────────────────────────────────────────────────────
 
-void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket *client) {
+void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QWebSocket *client) {
     const QString id      = cmd["id"].toString();
     const QString c       = cmd["cmd"].toString();
     const QJsonObject payload = cmd["payload"].toObject();
@@ -57,7 +57,7 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
 
     // ── Tab management ────────────────────────────────────────────────────────
     if (c == "tab.new") {
-        srv->respond(client, id, true, srv->createTab());
+        srv->respond(client, id, true, srv->createTab(client));
         return;
     }
     if (c == "tab.close") {
@@ -75,12 +75,24 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QLocalSocket 
     }
 
     // ── Lifecycle commands ────────────────────────────────────────────────────
-    // "close": global, session-ending — actually terminates the binary process.
-    // Not tab-scoped, no tabId required.
+    // "close": now PER-CLIENT, not global. The binary is a shared daemon —
+    // one script disconnecting must never yank the browser out from under
+    // every other script sharing it. This closes only the tabs *this*
+    // client owns (unless flagged noclose) and drops its own connection;
+    // PiggyServer::onClientDisconnected() does the actual tab cleanup.
+    // The process itself keeps running for everyone else.
     if (c == "close") {
         srv->respond(client, id, true, "closing");
-        srv->stop();               // tear down socket server + all tabs
-        QCoreApplication::quit();  // end the process — srv->stop() alone leaves the event loop running
+        if (client) client->close();
+        return;
+    }
+
+    // "shutdown": the real, global kill switch. Terminates the whole shared
+    // binary — every connected script, every tab. Use deliberately.
+    if (c == "shutdown") {
+        srv->respond(client, id, true, "shutting down");
+        srv->stop();
+        QCoreApplication::quit();
         return;
     }
 

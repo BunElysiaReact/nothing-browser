@@ -8,7 +8,7 @@
 
 bool piggy_handleExport(PiggyServer *srv, const QString &c,
                          const QJsonObject &payload,
-                         QLocalSocket *client, const QString &id,
+                         QWebSocket *client, const QString &id,
                          const QString &tabId) {
     if (c == "export.json") {
         if (!srv->tabs().contains(tabId)) { srv->respond(client, id, false, "invalid tabId"); return true; }

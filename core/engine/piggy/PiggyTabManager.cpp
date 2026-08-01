@@ -129,7 +129,7 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId) {
 
 // ─── createTab() ─────────────────────────────────────────────────────────────
 
-QString piggy_createTab(PiggyServer *srv) {
+QString piggy_createTab(PiggyServer *srv, QWebSocket *owner) {
     QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
 
     QWebEngineProfile *profile = nullptr;
@@ -203,11 +203,8 @@ QString piggy_createTab(PiggyServer *srv) {
             event["event"] = "navigate";
             event["tabId"] = id;
             event["url"]   = url.toString();
-            QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
-            for (auto *client : srv->clients()) {
-                if (client && client->state() == QLocalSocket::ConnectedState)
-                    client->write(msg);
-            }
+            // Tab-scoped: only the script that owns this tab needs to know.
+            srv->sendToOwner(id, event);
         });
 
     // Forward dialog signals to the socket as events, same pattern as
@@ -221,11 +218,8 @@ QString piggy_createTab(PiggyServer *srv) {
             event["tabId"]       = id;
             event["dialogType"]  = dialogType;
             event["message"]     = message;
-            QByteArray msg = QJsonDocument(event).toJson(QJsonDocument::Compact) + "\n";
-            for (auto *client : srv->clients()) {
-                if (client && client->state() == QLocalSocket::ConnectedState)
-                    client->write(msg);
-            }
+            // Tab-scoped: only the script that owns this tab needs to know.
+            srv->sendToOwner(id, event);
         });
 
     TabContext ctx;
@@ -233,6 +227,7 @@ QString piggy_createTab(PiggyServer *srv) {
     ctx.interceptor = interceptor;
     ctx.capture     = capture;
     srv->tabs().insert(id, ctx);
+    srv->setTabOwner(id, owner);
 
     emit srv->tabCreated(id, p);
     qDebug() << "[PiggyServer] Tab created:" << id;

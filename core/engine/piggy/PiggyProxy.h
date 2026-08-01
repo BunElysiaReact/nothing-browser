@@ -2,7 +2,7 @@
 #include <QObject>
 #include <QString>
 #include <QJsonObject>
-#include <QLocalSocket>
+#include <QWebSocket>
 
 class PiggyServer;
 
@@ -14,4 +14,4 @@ void piggy_wireProxyEvents(PiggyServer *srv);
 // Returns true if command was handled.
 bool piggy_handleProxy(PiggyServer *srv, const QString &c,
                         const QJsonObject &payload,
-                        QLocalSocket *client, const QString &id);
+                        QWebSocket *client, const QString &id);

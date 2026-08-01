@@ -11,7 +11,7 @@ QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
 // ─── Navigate ────────────────────────────────────────────────────────────────
 
 void piggy_navigate(PiggyServer *srv, const QString &url,
-                    QLocalSocket *client, const QString &reqId,
+                    QWebSocket *client, const QString &reqId,
                     const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
     QObject::connect(p, &QWebEnginePage::loadFinished, srv,
@@ -25,7 +25,7 @@ void piggy_navigate(PiggyServer *srv, const QString &url,
 
 bool piggy_handleNavigation(PiggyServer *srv, const QString &c,
                              const QJsonObject &payload,
-                             QLocalSocket *client, const QString &id,
+                             QWebSocket *client, const QString &id,
                              const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
 

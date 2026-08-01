@@ -14,7 +14,7 @@ static QString escSel(QString s) {
 
 bool piggy_handleFind(PiggyServer *srv, const QString &c,
                        const QJsonObject &payload,
-                       QLocalSocket *client, const QString &id,
+                       QWebSocket *client, const QString &id,
                        const QString &tabId) {
     auto *p = piggy_page(srv, tabId);
 
