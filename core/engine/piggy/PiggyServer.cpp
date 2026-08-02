@@ -130,6 +130,16 @@ void PiggyServer::onNewConnection() {
                 this, &PiggyServer::onClientTextMessage);
         connect(client, &QWebSocket::disconnected,
                 this, &PiggyServer::onClientDisconnected);
+
+        // Explicit ready ack, sent as a normal text frame — NOT relying on
+        // the WS "open" event alone, since a bad-key rejection also opens
+        // the socket for a moment before we close it. Clients should wait
+        // for this message (or a close) before treating the connection as
+        // usable.
+        QJsonObject ready;
+        ready["type"] = "ready";
+        client->sendTextMessage(QJsonDocument(ready).toJson(QJsonDocument::Compact));
+
         qDebug() << "[PiggyServer] Client connected — total clients:" << m_clients.size();
     }
 }
