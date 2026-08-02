@@ -574,3 +574,72 @@ jobs:
               | sudo tee /etc/apt/sources.list.d/nothing-browser.list
 
             sudo apt update && sudo apt install nothing-browser
+            ```
+
+            ---
+
+            ### Install — Nothing Browser (full UI)
+
+            **Linux (deb)**
+
+                sudo dpkg -i nothing-browser_*_amd64.deb
+
+            **Linux (tar.gz)**
+
+                tar -xzf nothing-browser-*-linux-x86_64.tar.gz
+                cd nothing-browser-*-linux-x86_64
+                ./nothing-browser
+
+            **Windows:** Download `.zip` → extract → run `nothing-browser.exe` (JRE bundled)
+
+            **macOS:** Download `.dmg` → drag to Applications (JRE bundled)
+
+            ---
+
+            ### Install — Nothing Browser Headless (Piggy daemon)
+
+            **Linux (deb)**
+
+                sudo dpkg -i nothing-browser-headless_*_amd64.deb
+
+            **Linux (tar.gz)**
+
+                tar -xzf nothing-browser-headless-*-linux-x86_64.tar.gz
+                ./nothing-browser-headless
+
+            **Windows:** Download headless `.zip` → extract → run `nothing-browser-headless.exe`
+
+            **macOS:** Download headless `.tar.gz` → extract → run `nothing-browser-headless`
+
+            ---
+
+            ### Install — Nothing Browser Headful (script-controlled visible window)
+
+            **Linux (deb)**
+
+                sudo dpkg -i nothing-browser-headful_*_amd64.deb
+
+            **Linux (tar.gz)**
+
+                tar -xzf nothing-browser-headful-*-linux-x86_64.tar.gz
+                ./nothing-browser-headful
+
+            **Windows:** Download headful `.zip` → extract → run `nothing-browser-headful.exe`
+
+            **macOS:** Download headful `.tar.gz` → extract → run `nothing-browser-headful`
+
+          files: |
+            release-artifacts/linux-build/*.deb
+            release-artifacts/linux-build/*.tar.gz
+            release-artifacts/linux-headless-build/*.deb
+            release-artifacts/linux-headless-build/*.tar.gz
+            release-artifacts/linux-headful-build/*.deb
+            release-artifacts/linux-headful-build/*.tar.gz
+            release-artifacts/windows-build/*.zip
+            release-artifacts/windows-headless-build/*.zip
+            release-artifacts/windows-headful-build/*.zip
+            release-artifacts/macos-build/*.dmg
+            release-artifacts/macos-headless-build/*.tar.gz
+            release-artifacts/macos-headful-build/*.tar.gz
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
