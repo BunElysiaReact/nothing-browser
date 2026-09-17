@@ -14,7 +14,8 @@
 #include "../engine/UpdateChecker.h"
 #include "../tabs/PluginsTab.h"
 #include "../tabs/PiggyTab.h"
-#include "../engine/piggy/PiggyServer.h"
+// PiggyServer only needed in headless/headful binaries, not in main MainWindow
+// #include "../engine/piggy/PiggyServer.h"
 
 class BrowserTab;
 class YoutubeTab;
@@ -35,7 +36,8 @@ private slots:
     void quickSaveSession(const QString &name);
 
 private:
-    PiggyServer    *m_piggyServer = nullptr;
+    // PiggyServer is only used in headless/headful binaries, not in main MainWindow
+    // PiggyServer *m_piggyServer = nullptr;
     QStackedWidget *m_stack;
     WelcomeScreen  *m_welcome;
     QWidget        *m_main;
