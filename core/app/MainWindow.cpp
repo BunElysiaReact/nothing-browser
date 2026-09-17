@@ -218,8 +218,8 @@ void MainWindow::setupTabs() {
             m_devtools, &DevToolsPanel::onRawRequest);
 
     root->addWidget(m_tabs);
-    m_piggyServer = new PiggyServer(m_piggy, this);
-    m_piggyServer->start();
+    // NOTE: Main MainWindow does NOT start a PiggyServer/WebSocket connection.
+    // Only headless and headful binaries launch WS servers.
 }
 
 QIcon MainWindow::tabIcon(const QString &color) {
