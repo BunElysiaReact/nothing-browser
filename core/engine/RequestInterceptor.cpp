@@ -7,11 +7,21 @@
 RequestInterceptor::RequestInterceptor(QObject *parent)
     : QWebEngineUrlRequestInterceptor(parent) {
     QString combined;
-    for (const QString &path : {":/filters/easylist.txt", ":/filters/easyprivacy.txt"}) {
-        QFile f(path);
-        if (f.open(QIODevice::ReadOnly))
-            combined += f.readAll() + "\n";
-    }
+    // Load EasyList - general ad blocking filters
+    QFile easylist(":/filters/easylist.txt");
+    if (easylist.open(QIODevice::ReadOnly))
+        combined += easylist.readAll() + "\n";
+    
+    // Load EasyPrivacy - tracking protection filters
+    QFile easyprivacy(":/filters/easyprivacy.txt");
+    if (easyprivacy.open(QIODevice::ReadOnly))
+        combined += easyprivacy.readAll() + "\n";
+    
+    // Load custom anti-adblock filters for enhanced blocking
+    QFile custom(":/filters/custom-anti-adblock.txt");
+    if (custom.open(QIODevice::ReadOnly))
+        combined += custom.readAll() + "\n";
+    
     m_blocker.load(combined.toStdString());
     m_blocker.finalize();
 }
@@ -65,12 +75,13 @@ void RequestInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info) {
     };
 
     if (m_adblockEnabled) {
-        auto req = adblock::Request::build(
-            info.requestUrl().toString().toStdString(),
-            info.firstPartyUrl().toString().toStdString(),
-            toAdblockType(info.resourceType())
-        );
-        if (m_blocker.check(req).should_block) {
+        std::string urlStr = info.requestUrl().toString().toStdString();
+        std::string firstPartyStr = info.firstPartyUrl().toString().toStdString();
+        
+        auto req = adblock::Request::build(urlStr, firstPartyStr, toAdblockType(info.resourceType()));
+        auto result = m_blocker.check(req);
+        
+        if (result.should_block) {
             info.block(true);
             return;
         }

@@ -1,99 +1,66 @@
-# ── Build output ──────────────────────────────────────────────────────────────
+```
+# Build artifacts
 build/
 dist/
-out/
-*.o
-*.a
-*.so
-*.dll
-*.exe
-*.app
-nothing-browser
-dump.txt
-# ── CMake ─────────────────────────────────────────────────────────────────────
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-install_manifest.txt
-CTestTestfile.cmake
-_deps/
 
-# ── Qt / MOC autogen ──────────────────────────────────────────────────────────
-*_autogen/
-moc_*.cpp
-moc_*.cpp.d
-qrc_*.cpp
-*.moc
-ui_*.h
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.egg-info/
 
-# ── Qt Creator ────────────────────────────────────────────────────────────────
-*.pro.user
-*.pro.user.*
-*.qbs.user
-*.qbs.user.*
-*.creator
-*.creator.user
-*.config
-CMakeLists.txt.user
+# Logs
+*.log
 
-# ── CLion / JetBrains ─────────────────────────────────────────────────────────
-.idea/
-cmake-build-*/
-*.iml
+# Environment
+.env
+.env.local
+*.env.*
 
-# ── VSCode ────────────────────────────────────────────────────────────────────
+# Editors
 .vscode/
-*.code-workspace
-
-# ── OS junk ───────────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
-desktop.ini
-*~
+.idea/
 *.swp
 *.swo
 
-# ── Scrapper / session data ───────────────────────────────────────────────────
-scrapper/data/
-scrapper/sessions/
-*.session
-*.har
-
-# ── Scripts / dist packages ───────────────────────────────────────────────────
-scripts/dist/
-*.deb
-*.rpm
-*.dmg
-*.pkg
-*.msi
-*.zip
-*.tar.gz
-*.tar.bz2
-
-# ── Logs ──────────────────────────────────────────────────────────────────────
-*.log
-logs/
-
-# ── Secrets (never commit these) ──────────────────────────────────────────────
-.env
-.env.*
-secrets/
-*.key
-*.pem
-# Build
-build/
-*.o
-*.a
-
-# Python scripts (reverse engineering stuff)
-*.py
-
-# Qt
-*.user
-CMakeCache.txt
-CMakeFiles/
-
-# Misc
-*.bak
+# OS
 .DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+htmlcov/
+.coverage
+
+# Compiled files
+*.pyc
+*.class
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.out
+
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+```

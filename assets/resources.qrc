@@ -6,5 +6,9 @@
         <file>icons/3-dots-bounce.svg</file>
         <file>icons/elysia.jpeg</file>
         <file>icons/main alysia.jpeg</file>
+        <!-- AdBlock filter lists -->
+        <file>filters/easylist.txt</file>
+        <file>filters/easyprivacy.txt</file>
+        <file>filters/custom-anti-adblock.txt</file>
     </qresource>
 </RCC>

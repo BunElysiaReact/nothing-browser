@@ -1,6 +1,7 @@
 #include "../include/blocker.h"
 #include <sstream>
 #include <algorithm>
+#include <regex>
 
 namespace adblock {
 
@@ -129,6 +130,52 @@ bool Blocker::check_pattern(const NetworkFilter& f, const Request& req) const {
 
     // No pattern — hostname match is enough
     if (f.pattern.empty()) return true;
+
+    // Handle regex patterns (patterns containing * or ^)
+    if (f.mask & IS_REGEX) {
+        try {
+            std::string regex_pattern = f.pattern;
+            
+            // Escape regex special characters except * and ^
+            std::string escaped;
+            for (char c : regex_pattern) {
+                if (c == '.' || c == '$' || c == '+' || c == '?' || 
+                    c == '{' || c == '}' || c == '(' || c == ')' || 
+                    c == '[' || c == ']' || c == '|' || c == '\\') {
+                    escaped += '\\';
+                }
+                escaped += c;
+            }
+            regex_pattern = escaped;
+            
+            // Convert * to .*
+            std::string converted;
+            for (size_t i = 0; i < regex_pattern.size(); ++i) {
+                if (regex_pattern[i] == '*') {
+                    converted += ".*";
+                } else if (regex_pattern[i] == '^') {
+                    // ^ matches any separator character or end of string
+                    converted += "(?:[^\\w\\d\\._%-]|$)";
+                } else {
+                    converted += regex_pattern[i];
+                }
+            }
+            regex_pattern = converted;
+            
+            // Apply anchors
+            if (f.mask & IS_LEFT_ANCHOR) {
+                regex_pattern = "^" + regex_pattern;
+            }
+            if (f.mask & IS_RIGHT_ANCHOR) {
+                regex_pattern = regex_pattern + "$";
+            }
+            
+            std::regex re(regex_pattern, std::regex::ECMAScript | std::regex::icase);
+            return std::regex_search(url, re);
+        } catch (...) {
+            // If regex compilation fails, fall back to simple matching
+        }
+    }
 
     // Left + right anchor — full URL equality
     if ((f.mask & IS_LEFT_ANCHOR) && (f.mask & IS_RIGHT_ANCHOR))
