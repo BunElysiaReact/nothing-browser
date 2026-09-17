@@ -1,0 +1,154 @@
+! *** Custom Anti-Adblock Filters for adblock-tester.com ***
+! Version: 2024
+! Purpose: Block adblock detection scripts and improve blocking coverage
+
+! --- Block adblock detection scripts ---
+||adblock-tester.com^*/inject.js$script,important
+||adblock-tester.com^*/detect.js$script,important
+||adblock-tester.com^*/check.js$script,important
+||adblock-tester.com^*/anti-adblock.js$script,important
+||adblock-tester.com^*/detection.js$script,important
+
+! --- Block Google AdSense ---
+||pagead2.googlesyndication.com^$important
+||googleadservices.com^$important
+||googlesyndication.com^$important
+||doubleclick.net^$important
+||ad.doubleclick.net^$important
+||google-analytics.com^$important
+||googletagmanager.com^$important
+
+! --- Block Yandex Advertising ---
+||an.yandex.ru^$important
+||yandex.ru/system/context.js$important
+||mc.yandex.ru^$important
+||ymatuhin.ru^$important
+
+! --- Block Hotjar ---
+||static.hotjar.com^$important
+||hotjar.com^$important
+
+! --- Block Sentry ---
+||js.sentry-cdn.com^$important
+||browser.sentry-cdn.com^$important
+||*.sentry.io^$important
+
+! --- Block Bugsnag ---
+||d2wy8f7a9ursnm.cloudfront.net^$important
+||bugsnag.com^$important
+
+! --- Generic ad blocking patterns ---
+*$script,domain=adblock-tester.com
+/pixel.gif?
+/tracking.js
+/analytics.js
+/track.js
+/logger.js
+/beacon.js
+/stats.js
+/metrics.js
+
+! --- Block common ad server domains ---
+||adservice.google.com^
+||ads.google.com^
+||admob.google.com^
+||adsystem.google.com^
+||adwords.google.com^
+
+! --- Block redirect and tracking domains ---
+||moonlighthathel.org^$important
+||outbrain.com^$important
+||taboola.com^$important
+||revcontent.com^$important
+||bidswitch.net^$important
+||rubiconproject.com^$important
+||openx.net^$important
+
+! --- Block banner ads ---
+/banners/*.gif$image,important
+/banners/*.png$image,important
+/banners/*.swf$object,important
+/banner-ads/$image,important
+/ad-banner.$image,important
+
+! --- Block image-based ads with common patterns ---
+*banner*$image,third-party
+*ad$image,domain=~espn.com|~warpwire.com
+*advert*$image,third-party
+*sponsor*$image,third-party
+
+! --- Block popup and popunder scripts ---
+/popunder.js$script,important
+/popup.js$script,important
+/pop.js$script,important
+
+! --- Block common advertising networks ---
+||adsrvr.org^
+||adnxs.com^
+||casalemedia.com^
+||contextweb.com^
+||criteo.com^
+||demdex.net^
+||exoclick.com^
+||eyereturn.com^
+||fastclick.net^
+||imrworldwide.com^
+||mediaplex.com^
+||mookie1.com^
+||myvisualiq.net^
+||nexage.com^
+||quantserve.com^
+||rlcdn.com^
+||ru4.com^
+||serving-sys.com^
+||sharethrough.com^
+||sitescout.com^
+||smartadserver.com^
+||spotxchange.com^
+||tapad.com^
+||tidaltv.com^
+||turn.com^
+||undertone.com^
+||vidazoo.com^
+||yieldmo.com^
+||zedo.com^
+
+! --- Block analytics and tracking ---
+||analytics.google.com^
+||stats.g.doubleclick.net^
+||pixel.facebook.com^
+||facebook.com/tr^
+||connect.facebook.net^
+||twitter.com/i/jot^
+||log.byteoversea.com^
+||log*-app.byteoversea.com^
+
+! --- Remove URL parameters used for tracking ---
+||*$3rd_party_ads=$removeparam=3rd_party_ads
+||*&utm_source=$removeparam=utm_source
+||*&utm_medium=$removeparam=utm_medium
+||*&utm_campaign=$removeparam=utm_campaign
+||*&utm_content=$removeparam=utm_content
+||*&fbclid=$removeparam=fbclid
+||*&gclid=$removeparam=gclid
+||*&yclid=$removeparam=yclid
+
+! --- Block websocket connections to ad servers ---
+||ws.adserver.com^$websocket
+||wss://tracking.$websocket
+
+! --- Block font requests from ad networks ---
+||fonts.googleapis.com/css?*family=*$font,domain=adblock-tester.com
+
+! --- Important rules for script blocking ---
+||adsbygoogle.js$script,important
+||adsense.js$script,important
+||adblock-detect.js$script,important
+||anti-block.js$script,important
+||check-adblock.js$script,important
+
+! --- Hide ad containers cosmetically (would need cosmetic filter support) ---
+! Note: These are cosmetic filters that would hide elements
+! adblock-tester.com##.ads
+! adblock-tester.com##[class*="ad-"]
+! adblock-tester.com##[id*="ad-"]
