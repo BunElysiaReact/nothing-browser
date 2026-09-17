@@ -1,0 +1,33 @@
+{
+  "name": "piggy-browser-automation",
+  "version": "1.0.0",
+  "description": "Browser automation library for Nothing Browser - headless/headful control via WebSocket",
+  "main": "index.js",
+  "scripts": {
+    "test:basic": "node test/basic.test.js",
+    "test:advanced": "node test/advanced.test.js",
+    "test": "npm run test:basic && npm run test:advanced"
+  },
+  "keywords": [
+    "browser-automation",
+    "headless-browser",
+    "web-scraping",
+    "nothing-browser",
+    "puppeteer-alternative",
+    "websocket",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.0",
+    "ernest-logger": "^1.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nothing-browser/nothing-browser.git"
+  }
+}
