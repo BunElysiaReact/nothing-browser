@@ -2,7 +2,7 @@
 #include <QWebEngineProfile>
 #include <QTimer>
 #include "app/MainWindow.h"
-#include "CdpProbe.h"   // <-- new
+  // <-- new
 
 int main(int argc, char *argv[]) {
     // ── Chromium flags — set BEFORE QApplication ──────────────────────────────
@@ -17,8 +17,7 @@ int main(int argc, char *argv[]) {
     );
 
     // ── NEW: enable remote debugging on port 9222 ──────────────────────────
-    qputenv("QTWEBENGINE_REMOTE_DEBUGGING", "127.0.0.1:9222");
-
+    
     QApplication app(argc, argv);
     app.setApplicationName("Nothing Browser");
     app.setApplicationVersion("0.1.0");
@@ -38,11 +37,6 @@ int main(int argc, char *argv[]) {
     MainWindow window;
     window.show();
 
-    // ── Start CDP probe after a short delay to let a page load ──────────────
-    auto *probe = new CdpProbe(&app);
-    QTimer::singleShot(3000, [probe]() {
-        probe->start();   // defaults to 127.0.0.1:9222
-    });
 
     return app.exec();
 }

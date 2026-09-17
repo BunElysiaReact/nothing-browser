@@ -8,7 +8,7 @@
 #include <QJsonArray>
 #include "../engine/NetworkCapture.h"
 #include "../engine/PluginManager.h"
-#include "../engine/CdpProbe.h"
+
 
 class Interceptor;
 
@@ -50,7 +50,6 @@ private:
     QLabel         *m_statusLabel;
     Interceptor    *m_interceptor;
     NetworkCapture *m_capture;
-    CdpProbe       *m_cdpProbe;
     bool            m_onHomePage = true;
 
     // Shortcuts storage

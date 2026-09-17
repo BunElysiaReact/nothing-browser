@@ -5,6 +5,7 @@
 #include <QNetworkCookie>
 #include <QVariantMap>
 #include <QDateTime>
+#include "Interceptor.h"
 
 struct CapturedRequest {
     QString id;
@@ -75,4 +76,5 @@ private slots:
 private:
     QWebEnginePage    *m_page    = nullptr;
     QWebEngineProfile *m_profile = nullptr;
+    Interceptor *m_interceptor = nullptr;
 };

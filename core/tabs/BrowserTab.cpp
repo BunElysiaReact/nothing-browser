@@ -2,7 +2,6 @@
 #include "../engine/Interceptor.h"
 #include "../engine/FingerprintSpoofer.h"
 #include "../engine/NetworkCapture.h"
-#include "../engine/CdpProbe.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWebEngineSettings>
@@ -316,16 +315,7 @@ void BrowserTab::setupWebEngine() {
     m_capture = new NetworkCapture(this);
     m_capture->attachToPage(page, profile);
 
-    // ── CDP PROBE – captures WebSocket frames via Chrome DevTools Protocol ──
-    m_cdpProbe = new CdpProbe(this);
-    connect(m_cdpProbe, &CdpProbe::wsFrameCaptured,
-            this, [this](const WebSocketFrame &frame) {
-                emit wsFrameCaptured(frame);
-            });
-    // Start after a short delay to let the engine spin up
-    QTimer::singleShot(2000, [this]() {
-        if (m_cdpProbe) m_cdpProbe->start();
-    });
+
 
     applySettings();
     PluginManager::instance().injectAll(profile);

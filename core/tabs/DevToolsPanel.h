@@ -27,6 +27,8 @@ class DevToolsPanel : public QWidget {
 public:
     explicit DevToolsPanel(QWidget *parent = nullptr);
 
+
+bool m_netPaused = false;
 public slots:
     void onRequestCaptured(const CapturedRequest &req);
     void onWsFrame(const WebSocketFrame &frame);

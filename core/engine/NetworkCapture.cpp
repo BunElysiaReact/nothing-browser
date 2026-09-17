@@ -1,4 +1,5 @@
 #include "NetworkCapture.h"
+#include "Interceptor.h"
 #include <QWebEngineProfile>
 #include <QWebEngineCookieStore>
 #include <QWebEngineScript>
@@ -13,6 +14,26 @@ NetworkCapture::NetworkCapture(QObject *parent) : QObject(parent) {}
 void NetworkCapture::attachToPage(QWebEnginePage *page, QWebEngineProfile *profile) {
     m_page    = page;
     m_profile = profile;
+
+    // ── Install the unified Interceptor (adblock + header spoof + capture) ──
+    // This MUST be set on the profile before any page navigation starts.
+    // Using the old RequestInterceptor here meant adblock was never active.
+    m_interceptor = new Interceptor(this);
+    profile->setUrlRequestInterceptor(m_interceptor);
+
+    // requestIntercepted — non-XHR requests that survived the blockers
+    connect(m_interceptor, &Interceptor::requestIntercepted,
+            this, [this](QString method, QString url, QString type, QString headers) {
+        CapturedRequest req;
+        req.id             = QString::number(QDateTime::currentMSecsSinceEpoch());
+        req.method         = method;
+        req.url            = url;
+        req.type           = type;
+        req.requestHeaders = headers;
+        req.status         = "(intercepted)";
+        req.timestamp      = QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+        emit requestCaptured(req);
+    });
 
     auto *store = profile->cookieStore();
     store->loadAllCookies();

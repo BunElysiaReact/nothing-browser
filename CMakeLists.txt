@@ -22,10 +22,18 @@ set(MOC_HEADERS
     core/engine/UpdateChecker.h
     core/engine/NetworkCapture.h
     core/engine/PluginManager.h
-    core/engine/CdpProbe.h                    # <-- fixed path
 )
 
-# ── PiggyServer — split into logical chunks ───────────────────────────────────
+# ── Adblock sources (inlined directly) ───────────────────────────────────────
+set(ADBLOCK_SOURCES
+    core/engine/adblock/src/tokenizer.cpp
+    core/engine/adblock/src/token_selector.cpp
+    core/engine/adblock/src/network_filter.cpp
+    core/engine/adblock/src/request.cpp
+    core/engine/adblock/src/blocker.cpp
+)
+
+# ── PiggyServer ───────────────────────────────────────────────────────────────
 set(PIGGY_SOURCES
     core/engine/piggy/PiggyServer.cpp
     core/engine/piggy/PiggyCommandRouter.cpp
@@ -47,6 +55,7 @@ set(PIGGY_SOURCES
 set(SHARED_SOURCES
     core/engine/FingerprintSpoofer.cpp
     core/engine/NetworkCapture.cpp
+    core/engine/RequestInterceptor.cpp
     core/engine/IdentityGenerator.cpp
     core/engine/IdentityStore.cpp
     core/engine/Interceptor.cpp
@@ -54,6 +63,7 @@ set(SHARED_SOURCES
     core/tabs/PiggyTab.cpp
     ${PIGGY_SOURCES}
     core/engine/piggy/Sessionmanager.cpp
+    ${ADBLOCK_SOURCES}
 )
 
 # ── DevToolsPanel ─────────────────────────────────────────────────────────────
@@ -81,7 +91,6 @@ add_executable(nothing-browser
     ${DEVTOOLS_SOURCES}
     ${SHARED_SOURCES}
     ${MOC_HEADERS}
-    core/engine/CdpProbe.cpp                 # <-- fixed path
 )
 
 # ── Headless binary ───────────────────────────────────────────────────────────
@@ -94,6 +103,14 @@ add_executable(nothing-browser-headless
 add_executable(nothing-browser-headful
     core/main_headful.cpp
     ${SHARED_SOURCES}
+)
+
+# ── Filter lists ──────────────────────────────────────────────────────────────
+qt_add_resources(nothing-browser "filters"
+    PREFIX "/filters"
+    FILES
+        assets/filters/easylist.txt
+        assets/filters/easyprivacy.txt
 )
 
 # ── macOS bundle settings ─────────────────────────────────────────────────────
@@ -123,6 +140,7 @@ set(COMMON_INCLUDES
     core/engine
     core/engine/piggy
     core/bridge
+    core/engine/adblock/include
 )
 
 target_include_directories(nothing-browser          PRIVATE ${COMMON_INCLUDES})

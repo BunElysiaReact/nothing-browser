@@ -7,6 +7,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  Actions
@@ -108,6 +111,26 @@ void DevToolsPanel::downloadSelected() {
     int row = m_netTable->currentRow();
     if (row < 0 || row >= m_netEntries.size()) return;
     const auto &e = m_netEntries[row];
+
+    // fetch asset fresh if no response body was captured
+    if (e.responseBody.isEmpty() || e.responseBody.contains("not available")) {
+        auto *nam   = new QNetworkAccessManager(this);
+        auto *reply = nam->get(QNetworkRequest(QUrl(e.url)));
+        connect(reply, &QNetworkReply::finished, this, [reply, e, this]() {
+            QByteArray data = reply->readAll();
+            QString filename = QUrl(e.url).fileName();
+            if (filename.isEmpty()) filename = "asset.bin";
+            QString path = QFileDialog::getSaveFileName(
+                this, "Save Asset", QDir::homePath() + "/" + filename,
+                "All Files (*)");
+            if (!path.isEmpty()) {
+                QFile f(path);
+                if (f.open(QIODevice::WriteOnly)) { f.write(data); f.close(); }
+            }
+            reply->deleteLater();
+        });
+        return;
+    }
 
     QString safeHost = QUrl(e.url).host().replace(".", "-");
     QString defName  = QDir::homePath() + "/" + safeHost + "_request.txt";

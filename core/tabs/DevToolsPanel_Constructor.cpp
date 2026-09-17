@@ -51,6 +51,13 @@ QWidget *DevToolsPanel::buildNetworkTab() {
     bl->addWidget(m_netCount); bl->addStretch();
     bl->addWidget(new QLabel("filter:", bar));
     bl->addWidget(m_netFilter); bl->addWidget(m_typeFilter); bl->addWidget(clearBtn);
+    auto *pauseBtn = btn("PAUSE SCROLL", "#ffaa00", bar);
+        pauseBtn->setCheckable(true);
+        connect(pauseBtn, &QPushButton::toggled, this, [this, pauseBtn](bool checked) {
+            m_netPaused = checked;
+            pauseBtn->setText(checked ? "RESUME SCROLL" : "PAUSE SCROLL");
+        });
+        bl->addWidget(pauseBtn);
 
     auto *splitter = new QSplitter(Qt::Horizontal, w);
 

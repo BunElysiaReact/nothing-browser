@@ -35,7 +35,7 @@ void DevToolsPanel::onRequestCaptured(const CapturedRequest &req) {
     m_netTotal++;
     m_netCount->setText(QString("CAPTURED: %1").arg(m_netTotal));
     updateTabLabel(0, "NETWORK", m_netTotal);
-    m_netTable->scrollToBottom();
+    if (!m_netPaused) m_netTable->scrollToBottom();
 }
 
 void DevToolsPanel::onRawRequest(const QString &method, const QString &url,
