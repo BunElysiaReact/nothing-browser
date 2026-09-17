@@ -48,6 +48,60 @@ Every request, response, WebSocket frame, cookie, and storage write is captured 
 - **Zero telemetry** — no analytics, no phoning home, nothing stored after session ends
 - **Auto-update** — checks GitHub Releases on launch and every 6 hours, downloads and installs updates in-app with one click
 - **Plugin system** — community JS plugins installed from inside the browser
+- **Piggy automation library** — full-featured Node.js API for headless/headful browser control via WebSocket
+
+---
+
+## 🤖 Piggy Automation Library
+
+Nothing Browser includes **Piggy**, a powerful browser automation library with a clean chainable API.
+
+### Quick Start
+
+```javascript
+const piggy = require('./lib');
+
+(async () => {
+  await piggy.launch({ mode: 'headless' });
+  const site = await piggy.site('mysite', { url: 'https://example.com' });
+  
+  const title = await site.pageTitle();
+  const text = await site.text('h1');
+  
+  console.log(`Title: ${title}, H1: ${text}`);
+  
+  await piggy.close();
+})();
+```
+
+### Features
+
+- **Chainable API** - All navigation and interaction methods return the Site object
+- **Multi-site support** - Control multiple tabs/sites in parallel
+- **Proxy management** - Built-in proxy rotation, testing, and OpenVPN support
+- **Network capture** - Capture requests, WebSocket frames, cookies, and storage
+- **Smart reconnection** - Auto-joins existing instances or spawns new binaries
+- **Human mode** - Optional human-like behavior patterns
+- **Rich logger** - Emoji-enhanced logging with file output
+
+📖 **[Full Piggy Documentation](./lib/README.md)**
+
+### Installation
+
+```bash
+npm install ws ernest-logger
+```
+
+### Test Scripts
+
+```bash
+# Basic tests
+node lib/test/basic.test.js
+
+# Advanced tests  
+node lib/test/advanced.test.js
+```
+
 - **YouTube tab** — YouTube client without API keys (via NewPipe Extractor)
 
 ---
