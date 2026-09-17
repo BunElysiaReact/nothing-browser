@@ -20,8 +20,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "ws": "^8.14.0",
-    "ernest-logger": "^1.0.0"
+    "ernest-logger": "^1.1.0",
+    "ws": "^8.21.3"
   },
   "engines": {
     "node": ">=14.0.0"

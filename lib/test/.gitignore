@@ -1,0 +1,8 @@
+# Test logs and temporary files
+*.log
+*.tmp
+piggy.log
+test-results/
+coverage/
+node_modules/
+.DS_Store
