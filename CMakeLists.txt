@@ -94,16 +94,18 @@ add_executable(nothing-browser
 )
 
 # ── Headless binary ───────────────────────────────────────────────────────────
-add_executable(nothing-browser-headless
+add_executable(nothing_headless
     core/main_headless.cpp
     ${SHARED_SOURCES}
 )
+set_target_properties(nothing_headless PROPERTIES OUTPUT_NAME "nothing_headless")
 
 # ── Headful binary ────────────────────────────────────────────────────────────
-add_executable(nothing-browser-headful
+add_executable(nothing_headful
     core/main_headful.cpp
     ${SHARED_SOURCES}
 )
+set_target_properties(nothing_headful PROPERTIES OUTPUT_NAME "nothing_headful")
 
 # ── Filter lists ──────────────────────────────────────────────────────────────
 qt_add_resources(nothing-browser "filters"

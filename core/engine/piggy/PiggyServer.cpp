@@ -18,7 +18,7 @@ void piggy_handleCommand(PiggyServer *srv, const QJsonObject &cmd, QWebSocket *c
 QString piggy_createTab(PiggyServer *srv, QWebSocket *owner);
 void    piggy_closeTab(PiggyServer *srv, const QString &tabId);
 QWebEnginePage* piggy_page(PiggyServer *srv, const QString &tabId);
-void    piggy_configureProfile(QWebEngineProfile *profile);
+void piggy_configureProfile(QWebEngineProfile *profile, bool persistent = false, const QString &storagePath = QString());
 void    piggy_wireProxyEvents(PiggyServer *srv);
 
 // ─── Constructors ─────────────────────────────────────────────────────────────
@@ -28,7 +28,7 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
 {
     if (!m_piggy) {
         m_ownProfile = new QWebEngineProfile("piggy-persistent", this);
-        piggy_configureProfile(m_ownProfile);
+        piggy_configureProfile(m_ownProfile, true, binaryDir() + "/nothing-data");
         m_ownPage = new QWebEnginePage(m_ownProfile, this);
     }
     QWebEngineProfile *profile = m_piggy ? m_piggy->getPage()->profile() : m_ownProfile;
@@ -40,6 +40,9 @@ PiggyServer::PiggyServer(PiggyTab *piggy, QObject *parent)
 PiggyServer::PiggyServer(QWebEnginePage *page, QObject *parent)
     : QObject(parent), m_piggy(nullptr), m_headfulPage(page)
 {
+    // Use volatile mode for headful/headless - data stored in nothing-data folder but cleared on exit
+    QString storagePath = QCoreApplication::applicationDirPath() + "/nothing-data";
+    piggy_configureProfile(page->profile(), false, storagePath);
     m_session = new SessionManager(page->profile(), this);
     m_session->load();
     piggy_wireProxyEvents(this);

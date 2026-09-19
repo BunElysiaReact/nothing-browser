@@ -16,12 +16,24 @@
 
 // ─── Profile configuration ────────────────────────────────────────────────────
 
-void piggy_configureProfile(QWebEngineProfile *profile) {
-    QString base = QDir::homePath() + "/.piggy/" + profile->storageName();
-    profile->setPersistentStoragePath(base + "/storage");
-    profile->setCachePath(base + "/cache");
-    profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
-    profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+void piggy_configureProfile(QWebEngineProfile *profile, bool persistent = false, const QString &storagePath = QString()) {
+    QString base;
+    if (persistent && !storagePath.isEmpty()) {
+        base = storagePath;
+    } else {
+        base = QDir::homePath() + "/.piggy/" + profile->storageName();
+    }
+    
+    if (persistent) {
+        profile->setPersistentStoragePath(base + "/storage");
+        profile->setCachePath(base + "/cache");
+        profile->setHttpCacheType(QWebEngineProfile::DiskHttpCache);
+        profile->setPersistentCookiesPolicy(QWebEngineProfile::ForcePersistentCookies);
+    } else {
+        // Volatile mode - everything in memory
+        profile->setHttpCacheType(QWebEngineProfile::MemoryHttpCache);
+        profile->setPersistentCookiesPolicy(QWebEngineProfile::NoPersistentCookies);
+    }
 
     profile->setHttpUserAgent(
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -38,6 +50,14 @@ void piggy_configureProfile(QWebEngineProfile *profile) {
     s->setAttribute(QWebEngineSettings::WebGLEnabled,                    true);
     s->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled,      true);
     s->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled,           true);
+    s->setAttribute(QWebEngineSettings::AutoLoadImages,                  true);
+    s->setAttribute(QWebEngineSettings::PluginsEnabled,                  true);
+    s->setAttribute(QWebEngineSettings::HyperlinkAuditingEnabled,        false);
+    s->setAttribute(QWebEngineSettings::JavascriptCanPaste,              true);
+    s->setAttribute(QWebEngineSettings::FocusOnNavigationEnabled,        true);
+    s->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture,     false);
+    s->setAttribute(QWebEngineSettings::SpatialNavigationEnabled,        true);
+    s->setAttribute(QWebEngineSettings::PdfViewerEnabled,                true);
 
     static const QString kChromeSpoof = R"JS(
 (function() {
